@@ -1,0 +1,47 @@
+# ============================================================
+#  Keil MDK-ARM build outputs
+# ============================================================
+MDK-ARM/myfoc/
+MDK-ARM/Objects/
+MDK-ARM/Listings/
+MDK-ARM/DebugConfig/
+MDK-ARM/*.log
+MDK-ARM/*.uvguix
+MDK-ARM/*.uvguix.*
+*.axf
+*.hex
+*.bin
+*.elf
+*.map
+*.o
+*.d
+*.crf
+*.lnp
+*.dep
+*.htm
+*.iex
+*.tra
+*.sct
+*.build_log.htm
+
+# ============================================================
+#  Host unit-test binaries
+# ============================================================
+test/host/run_tests.exe
+test/host/*.exe
+test/host/*.o
+
+# ============================================================
+#  Vendor CMSIS DSP: 45 MB, unused by this project (no arm_math.h),
+#  fully regenerable by CubeMX. Kept out to keep the repo small.
+# ============================================================
+Drivers/CMSIS/DSP/
+
+# ============================================================
+#  Editor / OS noise
+# ============================================================
+.vscode/
+.settings/
+*.bak
+*.orig
+Thumbs.db
