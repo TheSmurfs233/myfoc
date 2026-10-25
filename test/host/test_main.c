@@ -1017,6 +1017,36 @@ static void test_enc(void)
     }
     section_end();
 
+    section("enc: 15 real frames captured on hardware decode with a good CRC");
+    {
+        /* Raw SSI frames logged from the board (see docs/14 section 9).
+         * They validate the table-driven CRC against the chip, not against
+         * our own encoder function. */
+        static const uint8_t raw[15][3] = {
+            { 0x4Eu, 0xCAu, 0x05u }, { 0x4Eu, 0xC8u, 0x1Du },
+            { 0xAEu, 0x7Cu, 0x2Du }, { 0xAEu, 0x7Eu, 0x35u },
+            { 0xB3u, 0x60u, 0x05u }, { 0xB3u, 0x62u, 0x1Du },
+            { 0xBDu, 0xE0u, 0x1Au }, { 0xBDu, 0xE4u, 0x2Au },
+            { 0xC8u, 0x2Eu, 0x03u }, { 0xC8u, 0x2Cu, 0x1Bu },
+            { 0xCFu, 0x0Eu, 0x33u }, { 0xCFu, 0x0Cu, 0x2Bu },
+            { 0xD4u, 0x76u, 0x1Cu }, { 0xD4u, 0x78u, 0x17u },
+            { 0xD4u, 0x7Au, 0x0Fu },
+        };
+        uint8_t i;
+        uint8_t bad = 0u;
+
+        for (i = 0u; i < 15u; i++) {
+            fake_ssi_frame[0] = raw[i][0];
+            fake_ssi_frame[1] = raw[i][1];
+            fake_ssi_frame[2] = raw[i][2];
+            mid_enc_update();
+            if (mid_enc_info()->crc_ok == 0u) {
+                bad++;
+            }
+        }
+        T(bad == 0u);
+    }
+    section_end();
     section("enc: zero capture makes the current position 0 deg");
     enc_build_frame(2048u, 0u);                 /* 45 deg */
     mid_enc_update();

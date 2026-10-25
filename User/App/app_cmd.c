@@ -434,6 +434,26 @@ static void cmd_exec(char *line)
             } else {
                 log_printf("ERR enc dir");
             }
+        } else if ((n >= 2u) && (strcmp(tok[1], "bench") == 0)) {
+            uint8_t  f[3];
+            uint32_t k;
+            uint32_t t0;
+            uint32_t cyc;
+            uint32_t cfg1 = 0u;
+            uint32_t ccipr2 = 0u;
+
+            /* SPI only: no decode, no speed estimator */
+            t0 = bsp_prof_now();
+            for (k = 0u; k < 200u; k++) {
+                (void)bsp_ssi_read(f);
+            }
+            cyc = (bsp_prof_now() - t0) / 200u;
+            bsp_ssi_diag(&cfg1, &ccipr2);
+
+            log_printf("enc bench = %u cycles/read, %u ns",
+                       (unsigned)cyc, (unsigned)((cyc * 100u) / 17u));
+            log_printf(" spi cr1=%08x ccipr2=%08x",
+                       (unsigned)cfg1, (unsigned)ccipr2);
         } else if ((n >= 2u) && (strcmp(tok[1], "raw") == 0)) {
             uint8_t k;
 
@@ -536,7 +556,7 @@ static void cmd_exec(char *line)
         } else {
             static const char *const names[PROF_SLOT_COUNT] = {
                 "isr", "isr_period", "adc_read", "conv",
-                "wave", "cmd", "txpump", "loop"
+                "wave", "cmd", "txpump", "loop", "enc"
             };
             uint8_t i;
 

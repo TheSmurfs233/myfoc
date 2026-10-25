@@ -495,7 +495,12 @@ static void task_enc_slow(uint32_t now)
         return;
     }
     s_t_enc = now;
-    mid_enc_update();
+    {
+        uint32_t t0 = bsp_prof_now();
+
+        mid_enc_update();
+        bsp_prof_add(PROF_ENC, t0);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -525,6 +530,7 @@ static void task_adc(void)
     uint32_t n = bsp_adc_frames();
     uint32_t t0;
     uint32_t t_ref;                  /* ISR timestamp, snapshotted once */
+    uint32_t t_enc;
     uint16_t raw[3];
 
     if (n == s_adc_seen) { return; }
@@ -548,12 +554,16 @@ static void task_adc(void)
      * can never delay the duty update. The angle is therefore one frame old
      * for the next control step (S6 will move it to DMA). */
     if (ENC_DIV <= 1u) {
+        t_enc = bsp_prof_now();
         mid_enc_update();
+        bsp_prof_add(PROF_ENC, t_enc);
     } else {
         s_enc_div++;
         if (s_enc_div >= ENC_DIV) {
             s_enc_div = 0u;
+            t_enc = bsp_prof_now();
             mid_enc_update();
+            bsp_prof_add(PROF_ENC, t_enc);
         }
     }
 }

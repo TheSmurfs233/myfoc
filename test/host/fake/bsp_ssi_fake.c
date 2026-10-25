@@ -35,3 +35,9 @@ uint8_t bsp_ssi_read(uint8_t frame[3])
     frame[2] = fake_ssi_frame[2];
     return 0u;
 }
+
+void bsp_ssi_diag(uint32_t *cr1, uint32_t *ccipr2)
+{
+    if (cr1 != 0)   { *cr1   = 0u; }
+    if (ccipr2 != 0) { *ccipr2 = 0u; }
+}

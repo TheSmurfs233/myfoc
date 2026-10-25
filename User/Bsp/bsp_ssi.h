@@ -26,6 +26,11 @@ void bsp_ssi_init(void);
  * Returns 0 on success, non-zero if the transfer failed. */
 uint8_t bsp_ssi_read(uint8_t frame[3]);
 
+/* Diagnostic: SPI1 CFG1 and RCC_CCIPR2, used by the "enc bench" command.
+ * The measured frame time is 4x the theoretical 24 bits / 10.625 MHz, so
+ * the real baud-rate divider has to be checked. */
+void bsp_ssi_diag(uint32_t *cr1, uint32_t *ccipr2);
+
 #ifdef __cplusplus
 }
 #endif
