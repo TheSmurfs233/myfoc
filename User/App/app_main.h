@@ -60,6 +60,30 @@ typedef struct {
     float   i_max;       /* largest of |ia|,|ib|,|ic| this frame */
 } app_vf_info_t;
 
+/* Control-chain phase probe. The ADC interrupt is the reference: "isr" records
+ * where in the PWM period it fired (TIM1 CNT), the other three record how many
+ * microseconds later each step ran (DWT). */
+typedef struct {
+    uint16_t cnt;
+    uint16_t cnt_min;
+    uint16_t cnt_max;
+    uint8_t  valid;
+} app_phase_isr_t;
+
+typedef struct {
+    uint32_t last_cyc;   /* DWT cycles since the ADC interrupt */
+    uint32_t min_cyc;
+    uint32_t max_cyc;
+    uint8_t  valid;
+} app_phase_t;
+
+typedef struct {
+    app_phase_isr_t isr;     /* ADC interrupt entry (the sample instant) */
+    app_phase_t     pick;    /* ISR -> main loop picked the frame up    */
+    app_phase_t     comp;    /* pick -> duties computed (V/f + SVPWM)   */
+    app_phase_t     wr;      /* duties computed -> CCR1..3 written      */
+} app_phase_info_t;
+
 void                app_init(void);
 void                app_loop(void);
 
@@ -79,6 +103,9 @@ uint8_t app_vf_off(void);
 void    app_vf_set_acc(float hz_per_s);
 uint8_t app_vf_set_dir(uint8_t dir);
 const app_vf_info_t *app_vf_info(void);
+
+const app_phase_info_t *app_phase_info(void);
+void                    app_phase_reset(void);
 
 const char *app_state_name(uint8_t st);
 const char *app_mode_name(uint8_t m);

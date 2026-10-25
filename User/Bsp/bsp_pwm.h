@@ -48,6 +48,10 @@ float    bsp_pwm_ccr_to_duty(uint16_t ccr);
  * boot so a CubeMX regeneration that silently restores the old value is seen. */
 uint16_t bsp_pwm_get_dtg(void);
 
+/* Position inside the current PWM period in timer counts (0..PWM_ARR).
+ * 1 count = 11.76ns, full scale = 50us. Debug aid for "phase" measurements. */
+uint16_t bsp_pwm_get_cnt(void);
+
 #ifdef __cplusplus
 }
 #endif

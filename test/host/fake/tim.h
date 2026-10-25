@@ -16,7 +16,10 @@
 typedef struct {
     volatile uint32_t CR1;
     volatile uint32_t SR;
+    volatile uint32_t CNT;
     volatile uint32_t CCER;
+    volatile uint32_t CCMR1;
+    volatile uint32_t CCMR2;
     volatile uint32_t CCR1;
     volatile uint32_t CCR2;
     volatile uint32_t CCR3;
@@ -24,6 +27,11 @@ typedef struct {
     volatile uint32_t BDTR;
     volatile uint32_t EGR;
 } TIM_TypeDef;
+
+/* output-compare preload bits, same positions as the real registers */
+#define TIM_CCMR1_OC1PE     0x00000008u
+#define TIM_CCMR1_OC2PE     0x00000800u
+#define TIM_CCMR2_OC3PE     0x00000008u
 
 extern TIM_TypeDef fake_tim1_regs;
 #define TIM1 (&fake_tim1_regs)

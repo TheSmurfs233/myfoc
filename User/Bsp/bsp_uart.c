@@ -63,14 +63,9 @@ void bsp_uart_init(void)
     s_tx_start_ms = 0u;
     s_tx_stuck_cnt = 0u;
 
-    /* Switch RX DMA to CIRCULAR (overrides the CubeMX-generated NORMAL).
-     * CCR is only programmed inside HAL_DMA_Init (DMA_SetConfig on every start
-     * touches CNDTR/CPAR/CMAR only), so calling HAL_DMA_Init is required; the
-     * explicit SET_BIT afterwards is belt-and-braces in case Init.Mode is
-     * somehow ignored. */
-    hdma_usart1_rx.Init.Mode = DMA_CIRCULAR;
-    (void)HAL_DMA_Init(&hdma_usart1_rx);
-    SET_BIT(hdma_usart1_rx.Instance->CCR, DMA_CCR_CIRC);
+    /* RX DMA mode comes from CubeMX (.ioc: USART1_RX = CIRCULAR). The firmware
+     * used to force-circular here; that override was removed on 2026-10-25 once
+     * the .ioc was fixed, so this module no longer rewrites a CubeMX setting. */
 
     /* Start reception: callback fires on buffer-full or line-idle */
     (void)HAL_UARTEx_ReceiveToIdle_DMA(&huart1, s_rx_dma_buf, DBG_RX_BUF_SIZE);

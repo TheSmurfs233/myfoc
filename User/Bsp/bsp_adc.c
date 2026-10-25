@@ -13,6 +13,7 @@
 #include "board_cfg.h"
 #include "adc.h"
 #include "bsp_prof.h"
+#include "bsp_pwm.h"
 
 static volatile uint16_t s_raw[3];
 static volatile uint32_t s_frames;
@@ -20,6 +21,7 @@ static volatile uint32_t s_ovr;
 static uint8_t           s_started;
 static uint8_t           s_status;      /* bit0 = cal OK, bit1 = start OK */
 static uint32_t          s_last_isr_cyc;
+static volatile uint16_t s_isr_cnt;     /* TIM1 counter at interrupt entry */
 
 /* ------------------------------------------------------------------ */
 /* Init                                                                */
@@ -34,6 +36,7 @@ void bsp_adc_init(void)
     s_started     = 0u;
     s_status      = 0u;
     s_last_isr_cyc = 0u;
+    s_isr_cnt     = 0u;
 
     /* Calibration must run with the ADC disabled and the bridge off. */
     if (HAL_ADCEx_Calibration_Start(&hadc2, ADC_SINGLE_ENDED) == HAL_OK) {
@@ -69,6 +72,16 @@ uint32_t bsp_adc_frames(void)
     return s_frames;
 }
 
+uint16_t bsp_adc_isr_cnt(void)
+{
+    return s_isr_cnt;
+}
+
+uint32_t bsp_adc_isr_cyc(void)
+{
+    return s_last_isr_cyc;
+}
+
 uint32_t bsp_adc_ovr_count(void)
 {
     return s_ovr;
@@ -93,21 +106,35 @@ void bsp_adc_get_cfg(uint32_t cfg[3])
 /* ------------------------------------------------------------------ */
 void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
 {
-    uint32_t t_isr = bsp_prof_now();
+    uint32_t t_isr = 0u;
+    uint8_t  probe;
 
     if (hadc->Instance != ADC2) { return; }
 
-    /* Period between two triggers; the very first sample has no predecessor */
-    if (s_last_isr_cyc != 0u) {
-        bsp_prof_add_cycles(PROF_ISR_PERIOD, (uint32_t)(t_isr - s_last_isr_cyc));
+    /* "prof off" also silences this probe, so the interrupt can be measured
+     * without any instrumentation cost. */
+    probe = bsp_prof_enabled();
+    if (probe != 0u) {
+        t_isr = bsp_prof_now();
+
+        /* Where inside the 50us PWM period the interrupt actually fires. */
+        s_isr_cnt = bsp_pwm_get_cnt();
+
+        /* Period between two triggers; the first sample has no predecessor */
+        if (s_last_isr_cyc != 0u) {
+            bsp_prof_add_cycles(PROF_ISR_PERIOD, (uint32_t)(t_isr - s_last_isr_cyc));
+        }
+        s_last_isr_cyc = t_isr;
     }
-    s_last_isr_cyc = t_isr;
 
     /* Direct register reads: HAL_ADCEx_InjectedGetValue() costs hundreds of ns */
     s_raw[0] = (uint16_t)ADC2->JDR1;
     s_raw[1] = (uint16_t)ADC2->JDR2;
     s_raw[2] = (uint16_t)ADC2->JDR3;
-    bsp_prof_add(PROF_ADC_READ, t_isr);
+
+    if (probe != 0u) {
+        bsp_prof_add(PROF_ADC_READ, t_isr);
+    }
 
     /* An overrun means a previous result was overwritten before we read it.
      * Counted (not fatal): OVR_DATA_PRESERVED keeps the newest data. */
@@ -117,5 +144,8 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
     }
 
     s_frames++;
-    bsp_prof_add(PROF_ISR, t_isr);
+
+    if (probe != 0u) {
+        bsp_prof_add(PROF_ISR, t_isr);
+    }
 }

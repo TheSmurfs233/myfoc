@@ -62,7 +62,8 @@ static uint32_t s_tick;
 uint32_t HAL_GetTick(void)          { return s_tick; }
 void     HAL_Delay(uint32_t ms)     { s_tick += ms; }   /* never blocks on the host */
 
-/* ---------------- FLASH: one fake 2KB page at CAL_FLASH_ADDR ------------- */
+/* ---------------- FLASH: fake ACR + one 2KB page at CAL_FLASH_ADDR -------- */
+FLASH_TypeDef fake_flash_regs;
 uint8_t fake_flash_page[0x800u];
 static int s_flash_ready;
 

@@ -117,6 +117,16 @@ extern DWT_TypeDef       fake_dwt;
 /* ---------------- FLASH ---------------- */
 /* The host build links test/host/fake/bsp_flash_fake.c instead of the real
  * bsp_flash.c, so no HAL flash stubs are needed here. */
+typedef struct {
+    volatile uint32_t ACR;
+} FLASH_TypeDef;
+
+extern FLASH_TypeDef fake_flash_regs;
+#define FLASH (&fake_flash_regs)
+
+#define FLASH_ACR_PRFTEN    (1u << 8)
+#define FLASH_ACR_ICEN      (1u << 9)
+#define FLASH_ACR_DCEN      (1u << 10)
 
 uint32_t          HAL_GetTick(void);
 void              HAL_Delay(uint32_t Delay);

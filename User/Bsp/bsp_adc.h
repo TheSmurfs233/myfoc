@@ -33,7 +33,12 @@ uint8_t  bsp_adc_started(void);
  * Printed by "cur" / "stat" so a failed start is visible instead of silent. */
 uint8_t  bsp_adc_status(void);
 uint32_t bsp_adc_frames(void);       /* completed injected sequences */
-uint32_t bsp_adc_ovr_count(void);    /* overrun events seen in the ISR */
+/* TIM1 counter captured at the last JEOC entry: position inside the 50us PWM
+ * period (0..PWM_ARR) where the interrupt actually fires. */
+uint16_t bsp_adc_isr_cnt(void);
+/* DWT cycle count latched at the last JEOC entry, i.e. a timestamp the "phase"
+ * probe subtracts from to get "how long after the sample" a step ran. */
+uint32_t bsp_adc_isr_cyc(void);uint32_t bsp_adc_ovr_count(void);    /* overrun events seen in the ISR */
 
 /* Copy the newest raw codes (JDR1..3). Safe to call from the main loop. */
 void     bsp_adc_get_raw(uint16_t raw[3]);

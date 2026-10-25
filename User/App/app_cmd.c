@@ -112,6 +112,7 @@ static void print_help(void)
     log_printf(" dir <0|1>      phase sequence: 1 reverses the rotation");
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
+    log_printf(" phase [reset]  where each step lands in the 50us PWM period");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -323,6 +324,36 @@ static void cmd_exec(char *line)
             log_printf("ERR dir must be 0 or 1");
         } else {
             log_printf("OK dir = %u", (unsigned)app_vf_info()->dir);
+        }
+    }
+    /* ---------------- phase ----------------- */
+    else if (strcmp(tok[0], "phase") == 0) {
+        const app_phase_info_t *ph = app_phase_info();
+
+        if ((n >= 2u) && (strcmp(tok[1], "reset") == 0)) {
+            app_phase_reset();
+            log_printf("OK phase reset");
+        } else {
+            /* isr: where in the 50us period the ADC interrupt fired (TIM1 CNT,
+             * 1 count = 11.76ns, peak = PWM_ARR). The other three are stage
+             * durations in tenths of a microsecond (170 cycles = 1us). */
+            uint32_t p0 = (ph->pick.min_cyc * 10u) / PHASE_CYC_PER_US;
+            uint32_t p1 = (ph->pick.max_cyc * 10u) / PHASE_CYC_PER_US;
+            uint32_t c0 = (ph->comp.min_cyc * 10u) / PHASE_CYC_PER_US;
+            uint32_t c1 = (ph->comp.max_cyc * 10u) / PHASE_CYC_PER_US;
+            uint32_t w0 = (ph->wr.min_cyc   * 10u) / PHASE_CYC_PER_US;
+            uint32_t w1 = (ph->wr.max_cyc   * 10u) / PHASE_CYC_PER_US;
+
+            log_printf("---- phase, stage us (isr cnt = sample point) ----");
+            log_printf(" isr cnt = %u..%u",
+                       (unsigned)ph->isr.cnt_min, (unsigned)ph->isr.cnt_max);
+            log_printf(" pick %u.%u..%u.%u  comp %u.%u..%u.%u  wr %u.%u..%u.%u",
+                       (unsigned)(p0 / 10u), (unsigned)(p0 % 10u),
+                       (unsigned)(p1 / 10u), (unsigned)(p1 % 10u),
+                       (unsigned)(c0 / 10u), (unsigned)(c0 % 10u),
+                       (unsigned)(c1 / 10u), (unsigned)(c1 % 10u),
+                       (unsigned)(w0 / 10u), (unsigned)(w0 % 10u),
+                       (unsigned)(w1 / 10u), (unsigned)(w1 % 10u));
         }
     }
     /* ---------------- cur ----------------- */

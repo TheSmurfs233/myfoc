@@ -653,6 +653,10 @@ static void test_pwm(void)
     T((fake_tim1_regs.BDTR & TIM_BDTR_MOE) == 0u);
     T((fake_tim1_regs.CCER & TIM_CCER_CC1E) == 0u);  /* main outputs off */
     T((fake_tim1_regs.CCER & TIM_CCER_CC4E) != 0u); /* CH4 stays on for ADC */
+    /* CCR preload must be on so duty updates land at the update event */
+    T((fake_tim1_regs.CCMR1 & TIM_CCMR1_OC1PE) != 0u);
+    T((fake_tim1_regs.CCMR1 & TIM_CCMR1_OC2PE) != 0u);
+    T((fake_tim1_regs.CCMR2 & TIM_CCMR2_OC3PE) != 0u);
     T(fake_tim1_regs.CCR1 == 2125u);
     T(fake_tim1_regs.CCR2 == 2125u);
     T(fake_tim1_regs.CCR3 == 2125u);
@@ -897,12 +901,59 @@ static void test_adc(void)
     bsp_adc_init();
     T(bsp_adc_frames() == 0u);
 
+    section("phase probe: ISR cnt + stage durations");
+    bsp_prof_enable(1u);                          /* the probe follows it */
+    app_phase_reset();
+    fake_tim1_regs.CNT = 1234u;
+    HAL_ADCEx_InjectedConvCpltCallback(&hadc2);   /* ISR latches CNT=1234 */
+    T(bsp_adc_frames() == 1u);
+    app_loop();                                   /* main loop consumes it */
+    T(app_phase_info()->isr.cnt == 1234u);
+    T(app_phase_info()->isr.valid == 1u);
+    T(app_phase_info()->pick.valid == 1u);        /* pickup latency measured */
+    app_phase_reset();
+    T(app_phase_info()->isr.valid == 0u);
+    T(app_phase_info()->pick.valid == 0u);
+    section_end();
+
+    section("phase probe: disabled together with the profiler");
+    app_phase_reset();
+    bsp_prof_enable(0u);
+    fake_tim1_regs.CNT = 2000u;
+    HAL_ADCEx_InjectedConvCpltCallback(&hadc2);   /* probe must stay silent */
+    app_loop();
+    T(app_phase_info()->isr.valid == 0u);
+    T(app_phase_info()->pick.valid == 0u);
+    bsp_prof_enable(1u);
+    app_phase_reset();
+    section_end();
+
     bsp_prof_enable(1u);
 }
 
 /* ================================================================== */
 /* SVPWM (Alg)                                                         */
 /* ================================================================== */
+/* cosf-based reference, used only to cross-check the lookup table. */
+static void ref_svpwm(float theta, float m, float duty[3])
+{
+    float hi, lo, off;
+    int   i;
+
+    duty[0] = 0.5f + 0.5f * m * cosf(theta);
+    duty[1] = 0.5f + 0.5f * m * cosf(theta - 2.0943951f);
+    duty[2] = 0.5f + 0.5f * m * cosf(theta + 2.0943951f);
+
+    hi = duty[0];
+    lo = duty[0];
+    for (i = 1; i < 3; i++) {
+        if (duty[i] > hi) { hi = duty[i]; }
+        if (duty[i] < lo) { lo = duty[i]; }
+    }
+    off = 0.5f * (hi + lo) - 0.5f;
+    for (i = 0; i < 3; i++) { duty[i] -= off; }
+}
+
 static void test_svpwm(void)
 {
     float d[3];
@@ -974,6 +1025,27 @@ static void test_svpwm(void)
         T(fabsf(fwd[0] - rev[0]) < 1e-6f);
         T(fabsf(fwd[1] - rev[2]) < 1e-6f);
         T(fabsf(fwd[2] - rev[1]) < 1e-6f);
+    }
+    section_end();
+
+    section("svpwm: lookup table matches cosf within 1 PWM count");
+    {
+        float a[3], b[3];
+        float worst = 0.0f;
+
+        for (i = 0; i < 720; i++) {
+            float th = -3.14159265f + (float)i * 6.2831853f / 720.0f;
+            int   k;
+
+            alg_svpwm(th, 0.95f, a);
+            ref_svpwm(th, 0.95f, b);
+            for (k = 0; k < 3; k++) {
+                float d = fabsf(a[k] - b[k]);
+                if (d > worst) { worst = d; }
+            }
+        }
+        /* one PWM count = 1/4250 = 2.35e-4 */
+        T(worst < (1.0f / 4250.0f));
     }
     section_end();
 }
@@ -1066,6 +1138,12 @@ static void test_vf(void)
 static void test_app(void)
 {
     force_current_ready();
+
+    section("sys: ART accelerator is enabled at boot");
+    T((fake_flash_regs.ACR & FLASH_ACR_PRFTEN) != 0u);
+    T((fake_flash_regs.ACR & FLASH_ACR_ICEN) != 0u);
+    T((fake_flash_regs.ACR & FLASH_ACR_DCEN) == 0u);   /* left off on purpose */
+    section_end();
 
     section("app: mode switch gating");
     (void)app_stop();
@@ -1331,6 +1409,18 @@ static void test_cmd(void)
     tx_clear();
     cmd_feed("prof reset\r\n");
     T(tx_contains("OK prof reset"));
+    section_end();
+
+    section("cmd: phase report");
+    tx_clear();
+    cmd_feed("phase\r\n");
+    T(tx_contains("phase, stage us"));
+    T(tx_contains("isr cnt = "));
+    T(tx_contains(" wr "));
+    if (g_fails != g_fail_mark) { tx_dump_on_fail(); }
+    tx_clear();
+    cmd_feed("phase reset\r\n");
+    T(tx_contains("OK phase reset"));
     section_end();
 
     section("cmd: unknown command");

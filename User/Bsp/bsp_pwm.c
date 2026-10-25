@@ -74,6 +74,14 @@ uint16_t bsp_pwm_get_dtg(void)
     return (uint16_t)(TIM1->BDTR & TIM_BDTR_DTG);
 }
 
+/* Position inside the current PWM period, in timer counts:
+ * 0 .. PWM_ARR, one count = 1/(20kHz*4250) = 11.76ns, full scale = 50us.
+ * Used by the "phase" command to see where the control loop lands. */
+uint16_t bsp_pwm_get_cnt(void)
+{
+    return (uint16_t)(TIM1->CNT & 0xFFFFu);
+}
+
 /* ------------------------------------------------------------------ */
 /* Init: counter running, all outputs off, safe duty preloaded         */
 /* ------------------------------------------------------------------ */
@@ -87,6 +95,14 @@ void bsp_pwm_init(void)
     TIM1->CCER &= ~PWM_CCER_MAIN;
     TIM1->CCER |= TIM_CCER_CC4E;
     TIM1->BDTR &= ~TIM_BDTR_MOE;
+
+    /* CCR preload. HAL_TIM_PWM_ConfigChannel() always sets OCxPE, so with the
+     * CubeMX boxes on "Output compare preload = Enable" (all three channels,
+     * .ioc: OC1/OC2/OC3Preload_PWM=ENABLE) these bits are already set. Re-assert
+     * them here so a future regeneration that flips one box off cannot silently
+     * bring back mid-pulse CCR updates. CH4 is left alone: CCR4 is never written. */
+    TIM1->CCMR1 |= (TIM_CCMR1_OC1PE | TIM_CCMR1_OC2PE);
+    TIM1->CCMR2 |= TIM_CCMR2_OC3PE;
 
     /* Zero vector preloaded: whenever the bridge is enabled it starts at 50% */
     ccr          = bsp_pwm_duty_to_ccr(PWM_START_DUTY);

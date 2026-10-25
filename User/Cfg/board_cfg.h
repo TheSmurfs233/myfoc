@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             31u
+#define FW_BUILD_ID             39u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -58,7 +58,9 @@ extern "C" {
 /* Integer version for display: 0.00005f * 1e6 evaluates to 49.99999 and would
  * truncate to 49, so always use this macro when printing Ts. */
 #define FOC_TS_US               (1000000u / FOC_FREQ_HZ)
-
+/* DWT cycles per microsecond; used by the "phase" probe to print delays
+ * without a 64-bit division (170 cycles = 1us at 170MHz). */
+#define PHASE_CYC_PER_US        (SYS_CORE_CLK_HZ / 1000000u)
 /* ==========================================================================
  * 2. TIM1 / PWM generation
  *    f_pwm = 170MHz / (2 * (ARR+1)) = 20.000kHz

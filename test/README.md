@@ -20,7 +20,7 @@ bash test/host/build.sh
   ringbuf: basic push/pop                   ok
   ...
 ============================
-checks: 336   failed: 0
+checks: 355   failed: 0
 RESULT: PASS
 ```
 
@@ -147,7 +147,7 @@ static void test_clarke(void)
 
 | 脚本 | 覆盖 | 断言数 |
 |---|---|---|
-| `s1_accept.py` | help(22 行)/ver/stat(13 行)、FireWater 禁冒号、按键/LED、状态机、`rate`、7 通道波形、丢帧 | 63 |
+| `s1_accept.py` | help(23 行)/ver/stat(13 行)、FireWater 禁冒号、按键/LED、状态机、`rate`、7 通道波形、丢帧 | 64 |
 | `s2_accept.py` | PWM 命令、占空比钳位、启停、封波、行数回归 | 25 |
 | `s3_accept.py` | 校准生命周期（erase→start→live→gen）、帧率、`pwm` 保护、DWT 时序画像 | 16 |
 

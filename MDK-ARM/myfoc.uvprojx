@@ -461,6 +461,11 @@
               <FilePath>../User/Bsp/bsp_flash.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_sys.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_sys.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_adc.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Bsp/bsp_adc.c</FilePath>

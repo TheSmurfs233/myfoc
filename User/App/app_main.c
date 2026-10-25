@@ -25,6 +25,7 @@
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
+#include "bsp_sys.h"
 #include "bsp_uart.h"
 #include "mid_current.h"
 #include "mid_log.h"
@@ -46,6 +47,76 @@ static alg_vf_t      s_vf;
 static app_vf_info_t s_vf_info;
 static uint16_t      s_i_fold_cnt;
 static uint16_t      s_i_trip_cnt;
+
+/* ---- where each control step lands inside the 50us PWM period ---- */
+static app_phase_info_t s_phase;
+
+static void phase_mark_isr(uint16_t cnt)
+{
+    if (bsp_prof_enabled() == 0u) { return; }
+
+    if (s_phase.isr.valid == 0u) {
+        s_phase.isr.cnt_min = cnt;
+        s_phase.isr.cnt_max = cnt;
+        s_phase.isr.valid   = 1u;
+    } else {
+        if (cnt < s_phase.isr.cnt_min) { s_phase.isr.cnt_min = cnt; }
+        if (cnt > s_phase.isr.cnt_max) { s_phase.isr.cnt_max = cnt; }
+    }
+    s_phase.isr.cnt = cnt;
+}
+
+/* Microseconds since t_ref (the ADC interrupt that produced this frame),
+ * kept in DWT cycles: converting to us here would cost a 64-bit division per
+ * mark (__aeabi_uldivmod, ~1us) and inflate the very number being measured.
+ * The command handler converts once when printing. */
+#define PHASE_MAX_CYC   340000u        /* 2ms at 170MHz: anything larger is bogus */
+
+static void phase_mark(app_phase_t *p, uint32_t t_ref)
+{
+    uint32_t cyc;
+
+    /* The probe follows the profiler switch: "prof off" leaves the control
+     * chain completely uninstrumented, which is how S6's real-time budget
+     * should be evaluated. */
+    if (bsp_prof_enabled() == 0u) {
+        return;
+    }
+
+    cyc = bsp_prof_now() - t_ref;
+
+    if (cyc > PHASE_MAX_CYC) {
+        return;                        /* the ADC interrupted again meanwhile */
+    }
+    if (p->valid == 0u) {
+        p->min_cyc = cyc;
+        p->max_cyc = cyc;
+        p->valid   = 1u;
+    } else {
+        if (cyc < p->min_cyc) { p->min_cyc = cyc; }
+        if (cyc > p->max_cyc) { p->max_cyc = cyc; }
+    }
+    p->last_cyc = cyc;
+}
+
+const app_phase_info_t *app_phase_info(void)
+{
+    return &s_phase;
+}
+
+void app_phase_reset(void)
+{
+    s_phase.isr.valid  = 0u;
+    s_phase.isr.cnt    = 0u;
+    s_phase.isr.cnt_min = 0u;
+    s_phase.isr.cnt_max = 0u;
+    s_phase.pick.valid = 0u;
+    s_phase.comp.valid = 0u;
+    s_phase.wr.valid   = 0u;
+    s_phase.pick.last_cyc = s_phase.pick.min_cyc = s_phase.pick.max_cyc = 0u;
+    s_phase.comp.last_cyc = s_phase.comp.min_cyc = s_phase.comp.max_cyc = 0u;
+    s_phase.wr.last_cyc   = s_phase.wr.min_cyc   = s_phase.wr.max_cyc   = 0u;
+}
 
 /* ------------------------------------------------------------------ */
 /* Name helpers                                                        */
@@ -103,8 +174,10 @@ void app_init(void)
     s_vf_info.i_max    = 0.0f;
     s_i_fold_cnt       = 0u;
     s_i_trip_cnt       = 0u;
+    app_phase_reset();
 
     /* ---- peripherals ---- */
+    bsp_sys_init();          /* ART: flash prefetch + I-cache, must be first */
     bsp_prof_init();         /* DWT cycle counter, must be first */
     bsp_gpio_init();
     bsp_uart_init();
@@ -276,8 +349,10 @@ const app_vf_info_t *app_vf_info(void)
 }
 
 /* One V/f step per ADC frame (20kHz). ts is exact, so the angle integration
- * has no jitter; S6 will move this into the ADC interrupt. */
-static void task_vf(void)
+ * has no jitter; S6 will move this into the ADC interrupt.
+ * t_pick = DWT timestamp taken as the main loop picked the frame up, so the
+ * "comp" and "wr" marks measure stage durations, not absolute offsets. */
+static void task_vf(uint32_t t_pick)
 {
     const current_sample_t *cs;
     float theta;
@@ -331,7 +406,13 @@ static void task_vf(void)
 
     m = alg_vf_mod_index(&s_vf);
     alg_svpwm(theta, m, duty);
-    bsp_pwm_set_duty(duty[0], duty[1], duty[2]);
+    {
+        uint32_t t_comp = bsp_prof_now();
+
+        phase_mark(&s_phase.comp, t_pick);      /* V/f + SVPWM cost */
+        bsp_pwm_set_duty(duty[0], duty[1], duty[2]);
+        phase_mark(&s_phase.wr, t_comp);        /* CCR write cost */
+    }
 
     s_vf_info.on       = 1u;
     s_vf_info.dir      = s_vf.dir;
@@ -407,19 +488,25 @@ static void task_adc(void)
 {
     uint32_t n = bsp_adc_frames();
     uint32_t t0;
+    uint32_t t_ref;                  /* ISR timestamp, snapshotted once */
     uint16_t raw[3];
 
     if (n == s_adc_seen) { return; }
     s_adc_seen = n;
 
+    t_ref = bsp_adc_isr_cyc();
+
     t0 = bsp_prof_now();
+    phase_mark(&s_phase.pick, t_ref);    /* how late the loop noticed the frame */
     bsp_adc_get_raw(raw);
     mid_current_update(raw);
     bsp_prof_add(PROF_CONV, t0);
 
+    phase_mark_isr(bsp_adc_isr_cnt());
+
     /* S4: the V/f ramp runs once per ADC frame, right after the currents are
      * fresh. S6 will fold the current loop into the same place. */
-    task_vf();
+    task_vf(t0);
 }
 
 /* ------------------------------------------------------------------ */
