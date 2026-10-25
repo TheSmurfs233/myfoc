@@ -13,15 +13,19 @@
 ## 2. 接口
 
 ```c
-/* User/Bsp/bsp_pwm.h */
-void     bsp_pwm_init(void);                      /* 起波，占空比 0（三路 50% 且 MOE 关） */
-void     bsp_pwm_enable(uint8_t en);              /* MOE 使能/封波 */
-void     bsp_pwm_set_duty(float da, float db, float dc);  /* 0.0~1.0，含饱和 */
-void     bsp_pwm_set_ccr(uint16_t c1, uint16_t c2, uint16_t c3); /* 直写，最快路径 */
-uint16_t bsp_pwm_get_arr(void);
-void     bsp_pwm_test_fixed(float duty);          /* S2 自检：三相固定占空比 */
+/* User/Bsp/bsp_pwm.h —— S2 已实现 */
+void     bsp_pwm_init(void);                  /* 配好 + 起计数器，MOE=0，CCR=50% */
+void     bsp_pwm_enable(void);                /* 装 CCR -> CCxE -> MOE */
+void     bsp_pwm_disable(void);               /* 立即 MOE=0，再关 CCxE */
+uint8_t  bsp_pwm_is_enabled(void);
+void     bsp_pwm_set_duty(float a, float b, float c);  /* 0~1，内部钳位，预装载 */
+void     bsp_pwm_set_all_duty(float d);
+void     bsp_pwm_get_duty(float *a, float *b, float *c); /* 读回"实际生效值" */
+uint16_t bsp_pwm_duty_to_ccr(float d);        /* 纯函数，主机可测 */
+float    bsp_pwm_ccr_to_duty(uint16_t ccr);
+uint16_t bsp_pwm_get_dtg(void);                /* BDTR.DTG 回读 */
 
-/* User/Alg/alg_svpwm.h */
+/* User/Alg/alg_svpwm.h —— S4 */
 typedef struct { float ta, tb, tc; } svpwm_out_t;   /* 三相占空比 0~1 */
 void alg_svpwm_calc(float valpha, float vbeta, float vdc, svpwm_out_t *out);
 ```
@@ -41,11 +45,20 @@ void alg_svpwm_calc(float valpha, float vbeta, float vdc, svpwm_out_t *out);
 | CH1/1N | PA8 / PA7 | tim.c |
 | CH2/2N | PA9 / PB0 | tim.c |
 | CH3/3N | PA10 / **PF0** | tim.c |
-| CH4 | 无引脚输出，CCR4=4249，**仅作 ADC 触发** | tim.c |
-| 死区 DTG | **4 → 23.5 ns 标称（实际生效 60ns，由 EG3033 内部兜底）** | tim.c 现值 10，S2 改 4 |
-| OSSR / OSSI | 均 DISABLE | tim.c |
+| 输出模式 | **CH1~CH3 = PWM2**（高电平居中于峰顶，低侧导通居中于谷底） | tim.c |
+| CH4 | **PA11（临时引出）**，PWM2；**CCR4 由 CubeMX 决定**（当前 Pulse=4000 → 脉宽 ≈2.9µs、上升沿在峰顶前 ≈1.5µs），**固件不写** | tim.c |
+| 死区 DTG | **4 → 23.5 ns 标称（实际生效 60ns，由 EG3033 内部兜底）** | tim.c 已改为 4 |
+| OSSR / OSSI | OSSR DISABLE / **OSSI ENABLE**（封波强制输出空闲电平 = 低） | tim.c |
 | Break | DISABLE（无 BKIN 引脚） | tim.c |
 | AutomaticOutput | DISABLE（MOE 需软件置位） | tim.c |
+
+> **CH4 引脚说明（2026-10-25 用户确认）**：CubeMX 把 `TIM1_CH4` 映射到了 **PA11**
+> （原理图上 PA11 本来是 FDCAN1_RX，本工程不用 CAN）。这是**为了用示波器观察
+> "采样触发"而临时引出来的**，不影响 ADC 触发——CH4 的比较事件在芯片内部，
+> 有没有引脚都能触发注入组。副作用是起波后 PA11 会有 20kHz 输出
+> （PWM2 下 PA11 大部分时间为低，峰顶附近有一段高脉冲；脉宽和位置由 CubeMX 里
+> CH4 的 Pulse 值决定，当前 4000 → 约 2.9µs 宽、上升沿在峰顶前约 1.5µs），
+> 调试时别把它当信号源以外的用途。
 
 ### 3.1 PWM 频率的精确口径
 
@@ -56,18 +69,47 @@ void alg_svpwm_calc(float valpha, float vbeta, float vdc, svpwm_out_t *out);
 
 ### 3.2 CCR ↔ 占空比映射
 
-中心对齐 PWM1 模式下：`duty = CCR / (ARR+1)`，所以
+**PWM2** 下：`duty = 1 − CCR / (ARR+1)`（CCR 是"低侧导通"的计数长度），所以
 
 ```c
-CCR = (uint16_t)(duty * 4250.0f + 0.5f);
+CCR = (uint16_t)((1.0f - duty) * 4250.0f + 0.5f);
 CCR = clamp(CCR, CCR_MIN, CCR_MAX);
 ```
 
-**为什么必须 clamp**：
-- `CCR = 0` → 上管全关、下管全开，低侧采样窗口最长但桥臂无法输出；
-- `CCR = ARR` → 下管全关，本周期无法采电流（INA240 在下管导通时才有电流）；
-- 建议 `CCR_MIN = 40`（≈0.94%，约 470ns 最小脉宽，匹配死区+驱动器传输延迟），
-  `CCR_MAX = 4210`。
+**为什么必须 clamp**（注意 PWM2 下 CCR 的语义反过来了）：
+- `CCR = 0` → 上管常开、占空比 100%，桥臂无法输出且采样窗口为零；
+- `CCR = ARR` → 下管常开、占空比 0%，上管永远不导通；
+- `CCR_MIN = 40` 对应**最大占空比 99.06%**，`PWM_CCR_MAX = ARR-40 = 4209`
+  对应**最小占空比 0.94%**——两端都留出最小脉宽，匹配死区与驱动器传输延迟。
+
+> S2 实现口径：`pwm` 命令回显的是**由 CCR 反算的实际占空比**，所以 `pwm 2` 显示 `0.99`、
+> `pwm 0.001` 显示 `0.01` —— 这是钳位后的真实值，不是取整错误。
+
+### 3.2.1 波形长什么样（PWM2，2026-10-25 改为"高电平居中"）
+
+`PWM2 + 中心对齐` 的判定是"**CNT ≥ CCR 时高**"，而计数器是 `0→ARR→0`，于是：
+
+- 靠近**峰顶（CNT=ARR）**时 CNT 大 → **高电平**（上管导通）；
+- 靠近**谷底（CNT=0）**时 CNT 小 → **低电平**（下管导通）。
+
+即 **"两端低、中间高"**：高电平跨在峰顶两侧，低电平跨在周期的起点/终点
+（谷底两侧），各自都是**同一个脉冲**。
+
+| 相 | 高电平 = 上管导通（居中于峰顶 25µs） | 低电平 = 下管导通（居中于谷底） |
+|---|---|---|
+| 10% | 22.5~27.5µs | 27.5~50µs 与 0~22.5µs |
+| 50% | 12.5~37.5µs | 37.5~50µs 与 0~12.5µs |
+| 90% | 2.5~47.5µs | 47.5~50µs 与 0~2.5µs |
+
+**峰顶（25µs，周期中心）时三相都在高电平段**（上管全开）。采样电阻是**串在相线里**的
+（inline），相电流连续流过，所以此刻照样能采到真实电流；而且这里是高电平脉冲的中心，
+离两侧开关沿最远。因此 CH4 的触发放在峰顶：`PWM2 + CCR4=ARR` 每周期在峰顶产生一个上升沿。
+
+> **为什么这么改**：用户 2026-10-25 要求波形呈"两端低、中间高"（PWM2）。
+> 低侧导通因此挪到谷底，但这**不影响采样**——相线串联采样与开关状态无关。
+>
+> "中心对齐"这个名字指的是**计数器三角对称、各边沿关于峰顶/谷底对称**，
+> 不是"脉冲位于周期中间"。
 
 ### 3.3 死区：EG3033 + AO4606 联合分析（已定 DTG=4）
 
@@ -115,6 +157,12 @@ MOE=0 封波时同理。所以**不需要任何极性取反**，也不存在"死
 
 **实际生效死区 = max(23.5ns, EG3033 内部 60ns) = 60ns**。
 设 23.5ns 或设 0，效果完全一样 —— 这是驱动内部 DT 兜底的结果，不是配置错误。
+
+> **测量口径（容易搞混）**：
+> - 在 MCU 的 `CHx/CHxN` 引脚（PA8/PA7…）上量到的是 **TIM1 设定值 ≈23.5ns**；
+> - 在 EG3033 的 `HOx/LOx`（功率管栅极）上量到的才是 **≈60ns 起**，
+>   叠加 MOSFET 开关延迟后 P/N 管真正不交叠的裕量约 96ns。
+> 验收时先在引脚上确认 23.5ns（证明 DTG 配置对），栅极那一步属于可选加测。
 
 **为什么不再加大**：死区每多 1µs，占空比损失 2%，低速小电流时相电流畸变明显。
 60ns 相对于 50µs 周期只有 0.12%，几乎无畸变，是这块硬件的最优解。
@@ -172,6 +220,27 @@ if (vα²+vβ² > vmax_lin²) 按比例缩回（保持角度不变）
 
 ---
 
+### 3.5 S2 已实现：启停时序（安全相关）
+
+```
+上电  MX_TIM1_Init (DTG=4, OSSI=1, MOE=0)
+      -> bsp_pwm_init(): CCxE=0, MOE=0, CCR1..3=50%, CCR4=1, CEN=1, UG
+
+start (mode 1)
+      -> bsp_pwm_enable(): 写 CCR -> UG 装载 -> CCxE=1 -> MOE=1
+
+stop
+      -> bsp_pwm_disable(): MOE=0（立即）-> CCxE=0 -> duty 回 50%
+```
+
+- **为什么不用 `HAL_TIM_PWM_Start()`**：它返回前会自己置 MOE，等于"先开桥臂、后装占空比"。
+  这里全程直接写寄存器，顺序固定。
+- **为什么默认 50%**：三相都 50% 就是零矢量，相间电压为 0，接不接电机都安全；
+  duty=0 会让三个下管常开（刹车），而且高侧没有 20kHz 边沿可看。
+- **为什么 OSSI 要 ENABLE**：MOE=0 时把六路强制到空闲电平（低）→ HIN=LIN=0 →
+  EG3033 内部互锁双关，引脚不会浮空。
+- **运行中改占空比**只写 CCR（预装载），三路在下一个 UEV 同时生效，不会瞬时错相。
+
 ## 4. 时序/数据流
 
 ```
@@ -207,20 +276,34 @@ if (vα²+vβ² > vmax_lin²) 按比例缩回（保持角度不变）
 
 ## 6. 验证方法（S2 台架清单）
 
-1. **频率**：示波器测任一路 PWM，应为 20.000kHz ±0.1%。
-2. **互补与死区**：同时抓 CH1(P A8) 与 CH1N(PA7)，测上升沿到上升沿的间隔 = 死区设定值。
-   六路全测一遍（三相死区应一致）。
-3. **占空比线性**：`bsp_pwm_test_fixed(0.1 / 0.5 / 0.9)` 三档，实测占空比误差 <1%。
-4. **相序**：固定 `ta=0.7, tb=0.4, tc=0.4`，用示波器确认 CH1 高电平最宽 → 相序正确。
-5. **封波**：`bsp_pwm_enable(0)` 后六路必须全部为低（或按 OSSI 设定进入安全态），
-   且下管不能常开（否则电机刹车）。**【TBD】OSSR/OSSI 是否要改成 ENABLE？**
-   建议：OSSI=ENABLE（空闲时输出空闲电平=低），OSSR=DISABLE（运行中不强制）。
+清单与 `01_项目进度.md` 的「二之二」一致，这里只列要点：
+
+1. **频率**：任一路 PWM，20.000kHz ±0.1%（周期 50.0µs）。
+2. **波形形态**：PWM2 → **高电平居中于峰顶、低电平居中于谷底（两端低、中间高）**。
+3. **互补与死区**：同抓 PA8 / PA7，PA8 下降沿 → PA7 上升沿 = **23.5ns**（TIM1 设定，
+   栅极处约 60ns）；六路都测一遍，任何时刻不交叠。
+4. **占空比线性**：`pwm 0.1` / `pwm 0.5` / `pwm 0.9`，实测高电平宽度误差 <1%。
+5. **相序**：`pwm 0.7 0.4 0.4`，CH1 高电平最宽 → A/B/C 映射正确。
+6. **采样触发点**：PA11（CH4，PWM2+CCR4=ARR）每周期在**峰顶**有一个上升沿，
+   即 PWM 周期中心（S3 的采样时刻）。
+7. **封波**：`stop` 后六路必须全部为低。
+   **✅ 已定（S2）**：`OSSI = ENABLE` + `OCIdleState/OCNIdleState = RESET`，
+   `OSSR` 保持 DISABLE（无 BKIN 输入，运行态强制无意义）。
+8. **钳位**：`pwm 0.001` / `pwm 2` 分别停在 0.94% / 99.06%，不会出现 0%/100%。
 
 ---
 
 ## 7. 已知限制与 TBD
 
+- 【约定】**固件不覆盖 CubeMX 的 TIM1 配置**：PWM 模式、DTG、OSSI、CH4 的 CCR4、
+  PA11 复用全部由 `.ioc`/CubeMX 决定。`bsp_pwm` 只做三件必须由软件做的事：
+  ① 写 `CCR1~3`（起动时 50% 零矢量，之后按 `pwm` 命令改）；② 开关 `CCxE`/`MOE`；
+  ③ 读 `BDTR.DTG` 做一致性校验（只读，不改）。
 - 【已定】死区 DTG=4（23.5ns 标称，实际 60ns），计算见 3.3 节
+- 【已定】OSSR=DISABLE / **OSSI=ENABLE**：封波后六路确定拉低，EG3033 双关
+- 【临时】CH4 引出到 PA11 只为示波器看触发；**若要恢复 FDCAN 必须改回"无输出"**
+  （CubeMX 选 Output Compare No Output，或至少删掉 `tim.c` 里 PA11 的 AF11 配置），
+  已登记到 `18_待确认清单.md`
 - 【TBD】CCR_MIN 是否要留更大余量（取决于电流采样最小脉宽需求）
 - 【TBD】Vbus 用实测值还是固定标称值（影响 SVPWM 归一化精度）
 - 【已知限制】ARR 只有 4250 级，若将来提高 PWM 频率到 40kHz，分辨率降到 2125 级（≈11 bit），

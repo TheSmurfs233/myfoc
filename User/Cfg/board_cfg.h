@@ -39,7 +39,15 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             13u
+#define FW_BUILD_ID             30u
+
+/* ---- zero-drift calibration record in flash ---------------------------- */
+/* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
+ * region is shrunk to 0x1F800 so the linker never places code there.
+ * magic 'CAL1', version bumps if the layout changes (v2 added the generation). */
+#define CAL_FLASH_ADDR          0x0801F800u
+#define CAL_FLASH_MAGIC         0x314C4143u     /* "CAL1" little endian */
+#define CAL_FLASH_VERSION       2u
 
 /* ==========================================================================
  * 1. System clock / control period
@@ -68,10 +76,27 @@ extern "C" {
  * through is impossible even with DTG = 0.
  * Minimum dead time keeps the phase current waveform clean. */
 #define PWM_DTG_REG             4u
-/* Duty clamp: keep a low-side conduction window for current sampling and
- * never reach 0% / 100% (which would kill the low-side shunt signal). */
-#define PWM_CCR_MIN             40u                     /* 0.94% ~ 470ns */
-#define PWM_CCR_MAX             (PWM_ARR - 40u)
+/* CH1..CH3 run in PWM mode 2: the high pulse is centred on the counter peak
+ * and the low sides conduct around the valley. CCR is therefore the *inactive*
+ * (low-side) duration, so CCR_MIN gives the MAXIMUM duty and CCR_MAX the
+ * minimum. Keeping 40..4209 never reaches 0% / 100% and always leaves a
+ * low-side conduction window for the current sampling at the valley (S3). */
+#define PWM_CCR_MIN             40u                     /* duty  99.06% */
+#define PWM_CCR_MAX             (PWM_ARR - 40u)         /* duty   0.94% */
+
+/* Duty applied when the bridge is first enabled. 50% on all three phases is
+ * the zero vector: no phase-to-phase voltage, so it is safe with or without a
+ * motor connected. */
+#define PWM_START_DUTY          0.5f
+
+/* CH4 / PA11 (ADC trigger for S3) is configured ENTIRELY by CubeMX: the
+ * "Pulse" value of TIM1 CH4 sets CCR4. With PWM2 the pin is high while
+ * CNT >= CCR4, so:
+ *   - CCR4 = ARR   -> rising edge exactly on the counter peak, ~6ns pulse
+ *                     (correct, but invisible on a scope);
+ *   - CCR4 = 4000  -> ~2.9us pulse, edge ~1.5us before the peak
+ *                     (current CubeMX value: visible, still near the centre).
+ * The firmware deliberately does NOT write CCR4, so the CubeMX setting stands. */
 
 /* ==========================================================================
  * 3. Three-phase current sensing (3 x INA240A2 + 25mOhm low-side shunt)
@@ -91,6 +116,21 @@ extern "C" {
 
 /* Software over-current trip (used from S7 on) */
 #define CUR_TRIP_A              1.2f
+
+/* Zero-drift calibration: average this many injected frames at 20kHz (12.8ms).
+ * Runs at "start" with the duty forced to the 50% zero vector, because the
+ * TIM1_CC4 trigger only reaches the ADC while the bridge is enabled (MOE=1). */
+#define CUR_CAL_SAMPLES         256u
+
+/* Saturation flag threshold: raw code within this many LSB of a rail. */
+#define CUR_SAT_MARGIN          8u
+
+/* Sign convention: positive = current flowing OUT of the bridge into the motor.
+ * Which way the INA240 actually reads depends on how IN+/IN- are wired across
+ * the shunt. Measured on the bench 2026-10-25 (motor, 0.55/0.45/0.45):
+ * A phase high -> current leaves the A bridge, but raw dropped below the offset,
+ * so the reading is inverted; -1.0f makes "out of the bridge" positive. */
+#define CUR_SIGN                (-1.0f)
 
 /* ==========================================================================
  * 4. DC bus voltage sensing
@@ -132,6 +172,12 @@ extern "C" {
 #define DBG_RX_RING_SIZE        1024u           /* parser ring buffer (power of 2) */
 #define DBG_TX_RING_SIZE        4096u           /* TX ring buffer (power of 2) */
 #define DBG_TX_DMA_CHUNK        64u             /* bytes per DMA transfer */
+
+/* TX watchdog. One 64-byte chunk at 1Mbaud takes ~0.64 ms, so a completion
+ * event that has not arrived 100 ms later is lost (UART error, DMA glitch).
+ * Without this, s_tx_busy would stay set forever and the debug link would go
+ * permanently silent while the motor keeps running. See bsp_uart_tx_pump(). */
+#define DBG_TX_STUCK_MS         100u
 
 /* Waveform output goes out on the SAME UART as the text (USART1) using the
  * FireWater text protocol, so VOFA+ can plot and you can still read the log. */

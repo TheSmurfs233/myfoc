@@ -42,6 +42,8 @@ Drivers/CMSIS/DSP/
 # ============================================================
 .vscode/
 .settings/
+__pycache__/
+*.pyc
 *.bak
 *.orig
 Thumbs.db

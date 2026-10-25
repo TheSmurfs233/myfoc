@@ -130,11 +130,16 @@ def main():
     # ---------- 1. help ----------
     out = lk.send("help")
     ls = lines(out)
-    check("help: 13 lines", len(ls) == 13, "got %d" % len(ls))
+    check("help: 18 lines", len(ls) == 18, "got %d" % len(ls))
     check("help: first line", ls and ls[0] == "[log] ---- commands ----", ls[0] if ls else "-")
     check("help: last line", ls and ls[-1] == "[log] ------------------", ls[-1] if ls else "-")
     check("help: rate says 1..500",
           any("rate <hz>" in x and "1..500" in x for x in ls))
+    check("help: pwm commands listed",
+          any("pwm <d>" in x for x in ls) and any("pwm <a> <b> <c>" in x for x in ls))
+    check("help: cur / cal / prof listed",
+          any(" cur " in x for x in ls) and any(" cal " in x for x in ls) and
+          any(" prof " in x for x in ls))
     check("help: all lines carry [log] marker", all(x.startswith("[log] ") for x in ls))
 
     # ---------- 2. FireWater text rule: no colon anywhere ----------
@@ -160,6 +165,10 @@ def main():
           any("VOFA+ = FireWater" in x for x in ls))
     bad_colon = [x for x in ls if ":" in x]
     check("ver: no ':' in any line (FireWater rule)", not bad_colon, str(bad_colon[:2]))
+    check("ver: build timestamp uses ';' instead of ':'",
+          any(x.startswith("[log] build = ") and ";" in x for x in ls),
+          [x for x in ls if x.startswith("[log] build = ")][0]
+          if any(x.startswith("[log] build = ") for x in ls) else "-")
 
     # ---------- 3b. firmware freshness ----------
     # The board reports FW_BUILD_ID ("build = ... #13"). Compare it with the
@@ -190,9 +199,11 @@ def main():
     # ---------- 4. stat ----------
     out = lk.send("stat")
     ls = lines(out)
-    check("stat: 10 lines", len(ls) == 10, "got %d" % len(ls))
+    check("stat: 12 lines", len(ls) == 12, "got %d" % len(ls))
     check("stat: state IDLE", any("state    = IDLE" in x for x in ls))
     check("stat: mode IDLE", any("mode     = IDLE" in x for x in ls))
+    check("stat: pwm line present and OFF", any("pwm      = OFF" in x for x in ls))
+    check("stat: adc line present", any("adc      = frames=" in x for x in ls))
     check("stat: no ':' in any line", not [x for x in ls if ":" in x])
     m = [x for x in ls if "loop     =" in x]
     check("stat: loop rate sane (100..900 kHz)",
@@ -235,18 +246,29 @@ def main():
     out = lk.send("mode 2")
     check("mode 2 accepted", any("OK mode=FOC" in x for x in lines(out)))
     out = lk.send("start")
-    check("start accepted", any("OK start, mode=FOC" in x for x in lines(out)))
+    check("start rejected in mode=FOC (no loop until S6)",
+          any("ERR mode=FOC not ready" in x for x in lines(out)))
+    st = lk.send("stat")
+    check("state stays IDLE after a rejected start",
+          any("state    = IDLE" in x for x in lines(st)))
+    out = lk.send("mode 1")
+    check("mode 1 accepted", any("OK mode=OPENLOOP" in x for x in lines(out)))
+    out = lk.send("start")
+    check("start accepted in OPENLOOP",
+          any("OK start, mode=OPENLOOP" in x for x in lines(out)))
     st = lk.send("stat")
     check("state RUN after start", any("state    = RUN" in x for x in lines(st)))
-    out = lk.send("mode 1")
+    check("pwm ON after start", any("pwm      = ON" in x for x in lines(st)))
+    out = lk.send("mode 2")
     check("mode change blocked while RUN",
           any("ERR stop the motor first" in x for x in lines(out)))
     out = lk.send("stop")
     check("stop accepted", any("OK stop, PWM off" in x for x in lines(out)))
     st = lk.send("stat")
     check("state IDLE after stop", any("state    = IDLE" in x for x in lines(st)))
+    check("pwm OFF after stop", any("pwm      = OFF" in x for x in lines(st)))
     check("mode persists after stop (by design)",
-          any("mode     = FOC" in x for x in lines(st)),
+          any("mode     = OPENLOOP" in x for x in lines(st)),
           "stop only resets state, not mode")
     out = lk.send("mode 0")
     check("mode 0 accepted after stop", any("OK mode=IDLE" in x for x in lines(out)))
@@ -266,9 +288,9 @@ def main():
     check("wave: CSV rows captured", len(csv) > 300, "rows=%d" % len(csv))
     check("wave: no stray non-CSV lines in stream", not other, str(other[:3]))
 
-    # every row must have exactly 6 fields
-    bad = [x for x in csv if len(x.split(",")) != 6]
-    check("wave: every row has 6 channels", not bad, str(bad[:2]))
+    # every row must have exactly 7 fields: t, duty a/b/c, ia/ib/ic
+    bad = [x for x in csv if len(x.split(",")) != 7]
+    check("wave: every row has 7 channels", not bad, str(bad[:2]))
 
     rows = [[float(v) for v in x.split(",")] for x in csv]
     if rows:
@@ -281,24 +303,21 @@ def main():
         check("wave: ch0 time strictly increasing", mono,
               "%.3f..%.3f" % (t[0], t[-1]))
 
-        states = set(int(r[1]) for r in rows)
-        check("wave: ch1 state == IDLE(1)", states == {1}, str(states))
-        modes = set(int(r[2]) for r in rows)
-        check("wave: ch2 mode == IDLE(0)", modes == {0}, str(modes))
+        # ch1..3 are the three duties (board is stopped here -> 50% zero vector)
+        duties = [v for r in rows for v in r[1:4]]
+        check("wave: ch1~3 are duties within 0..1",
+              all(0.0 <= v <= 1.0 for v in duties))
+        check("wave: ch1~3 are 0.50 while stopped",
+              all(abs(v - 0.5) < 0.01 for v in duties),
+              "min=%.2f max=%.2f" % (min(duties), max(duties)))
 
-        s = [r[4] for r in rows]
-        check("wave: ch4 sine within +-1000", min(s) >= -1001 and max(s) <= 1001,
-              "%.1f..%.1f" % (min(s), max(s)))
-        check("wave: ch4 actually swings (|min|,|max| > 500)",
-              min(s) < -500 and max(s) > 500)
-        # a smooth sine has small frame-to-frame steps
-        d = [abs(s[i + 1] - s[i]) for i in range(len(s) - 1)]
-        check("wave: ch4 smooth (max step < 60)", max(d) < 60,
-              "max step %.1f" % max(d))
-
-        k = [r[5] for r in rows]
-        check("wave: ch5 loop kHz sane (100..900)", 100 <= statistics.median(k) <= 900,
-              "%.0f" % statistics.median(k))
+        # ch4..6 are the phase currents (no load connected -> near zero)
+        cur = [v for r in rows for v in r[4:7]]
+        check("wave: ch4~6 are currents within +-1.32 A",
+              all(abs(v) <= 1.32 for v in cur))
+        check("wave: ch4~6 are ~0 A without a load",
+              all(abs(v) < 0.05 for v in cur),
+              "max |I| = %.3f A" % max(abs(v) for v in cur))
 
     m = [x for x in lines(st) if "wave     =" in x]
     check("wave: drop == 0 after 1.2 s @500Hz",

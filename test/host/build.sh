@@ -26,7 +26,12 @@ SRC="$HERE/test_main.c
      $ROOT/User/Mid/mid_ringbuf.c
      $ROOT/User/Mid/mid_log.c
      $ROOT/User/Mid/mid_vofa.c
+     $ROOT/User/Mid/mid_current.c
      $ROOT/User/Bsp/bsp_gpio.c
+     $ROOT/User/Bsp/bsp_pwm.c
+     $ROOT/User/Bsp/bsp_adc.c
+     $ROOT/User/Bsp/bsp_prof.c
+     $HERE/fake/bsp_flash_fake.c
      $ROOT/User/Bsp/bsp_uart.c
      $ROOT/User/App/app_main.c
      $ROOT/User/App/app_cmd.c"

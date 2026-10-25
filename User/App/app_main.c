@@ -19,8 +19,12 @@
 #include "app_main.h"
 #include "app_cmd.h"
 #include "board_cfg.h"
+#include "bsp_adc.h"
 #include "bsp_gpio.h"
+#include "bsp_prof.h"
+#include "bsp_pwm.h"
 #include "bsp_uart.h"
+#include "mid_current.h"
 #include "mid_log.h"
 #include "mid_vofa.h"
 
@@ -31,20 +35,8 @@ static app_status_t s_st;
 static uint32_t     s_loop_cnt;
 static uint32_t     s_t_1ms;
 static uint32_t     s_t_wave;
-static float        s_wave_phase01;   /* 0..1 wrap, for the test sine */
 static uint16_t     s_wave_period_ms; /* upload period in ms */
-
-/* 64-entry sine table (sin * 1000) used to verify the VOFA+ chain */
-static const int16_t s_sin_tab[64] = {
-       0,   98,  195,  290,  383,  471,  556,  634,
-     707,  773,  831,  883,  924,  957,  981,  995,
-    1000,  995,  981,  957,  924,  883,  831,  773,
-     707,  634,  556,  471,  383,  290,  195,   98,
-       0,  -98, -195, -290, -383, -471, -556, -634,
-    -707, -773, -831, -883, -924, -957, -981, -995,
-   -1000, -995, -981, -957, -924, -883, -831, -773,
-    -707, -634, -556, -471, -383, -290, -195,  -98
-};
+static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 
 /* ------------------------------------------------------------------ */
 /* Name helpers                                                        */
@@ -90,12 +82,19 @@ void app_init(void)
     s_loop_cnt       = 0u;
     s_t_1ms          = HAL_GetTick();
     s_t_wave         = s_t_1ms;
-    s_wave_phase01   = 0.0f;
     s_wave_period_ms = (uint16_t)(1000u / s_st.wave_rate_hz);
+    s_adc_seen       = 0u;
 
     /* ---- peripherals ---- */
+    bsp_prof_init();         /* DWT cycle counter, must be first */
     bsp_gpio_init();
     bsp_uart_init();
+    bsp_pwm_init();          /* counter runs, six outputs stay off (MOE=0) */
+    mid_current_init();      /* offsets to nominal, needs calibration */
+    bsp_adc_init();          /* arm the injected group (triggered by TIM1_CC4) */
+    /* Restore the zero-drift calibration from flash: with a valid record there
+     * is nothing to calibrate and "start" goes straight to work. */
+    (void)mid_current_load();
     app_cmd_init();
 
     /* ---- boot banner ---- */
@@ -113,12 +112,34 @@ void app_init(void)
                (unsigned)(RSHUNT_OHM * 1000.0f + 0.5f), (unsigned)INA240_GAIN,
                (unsigned)(CUR_A_PER_LSB * 1000000.0f + 0.5f),
                (unsigned)(CUR_RANGE_A * 1000.0f + 0.5f));
+    {
+        /* Power-on self-check result: where the zero-drift offsets came from.
+         * With a valid record nothing is calibrated later; without one the
+         * first "start" calibrates and writes the record back. */
+        const current_sample_t *cs = mid_current_get();
+
+        if (cs->ready != 0u) {
+            log_printf(" cal  = flash ok, off %u/%u/%u, gen=%u",
+                       (unsigned)cs->offset[0], (unsigned)cs->offset[1],
+                       (unsigned)cs->offset[2], (unsigned)cs->gen);
+        } else {
+            log_printf(" cal  = none, will calibrate at first start");
+        }
+    }
     log_printf(" uart = %u baud, VOFA+ = FireWater",
                (unsigned)DBG_UART_BAUD);
     log_printf("---------------------------------------------");
     log_printf(" KEY -> LED toggle");
     log_printf(" type 'help' for the command list");
     log_printf("=============================================");
+
+    /* CubeMX regeneration silently restores TIM1.DeadTime from the .ioc; the
+     * effective dead time is identical (60ns from the EG3033 either way) but a
+     * mismatch means tim.c and board_cfg.h disagree, so say it out loud. */
+    if (bsp_pwm_get_dtg() != (uint16_t)PWM_DTG_REG) {
+        log_printf("ERR bdtr dtg=%u expected=%u (tim.c / CubeMX)",
+                   (unsigned)bsp_pwm_get_dtg(), (unsigned)PWM_DTG_REG);
+    }
 
     s_st.state = APP_ST_IDLE;
 }
@@ -134,14 +155,27 @@ uint8_t app_start(void)
     if (s_st.mode == CTRL_IDLE) {
         return 2u;                       /* no control mode selected */
     }
+    if (s_st.mode != CTRL_OPENLOOP) {
+        return 3u;                       /* CTRL_FOC has no current loop yet (S6) */
+    }
+
+    /* The ADC trigger (TIM1_CC4) only reaches the ADC while MOE=1, so the
+     * zero-drift calibration can only run with the bridge enabled. Start at
+     * the 50% zero vector: no phase-to-phase voltage, hence no current. The
+     * 256 calibration frames take 12.8ms and complete in the background. */
+    bsp_pwm_set_all_duty(PWM_START_DUTY);
+    bsp_pwm_enable();                    /* preload duty, CCxE, then MOE */
+    if (mid_current_get()->ready == 0u) {
+        mid_current_restart_cal();
+    }
     s_st.state = APP_ST_RUN;
-    /* [S2] hook here: bsp_pwm_enable(1) + ALIGN sequence */
     return 0u;
 }
 
 uint8_t app_stop(void)
 {
-    /* [S2] hook here: bsp_pwm_enable(0) to shut the bridge down */
+    bsp_pwm_disable();                   /* MOE=0 first: six outputs low */
+    bsp_pwm_set_all_duty(PWM_START_DUTY);
     s_st.state = APP_ST_IDLE;
     return 0u;
 }
@@ -215,13 +249,32 @@ static void task_1ms(uint32_t now)
 }
 
 /* ------------------------------------------------------------------ */
+/* ADC task: consume the newest injected frame (20kHz)                 */
+/* ------------------------------------------------------------------ */
+static void task_adc(void)
+{
+    uint32_t n = bsp_adc_frames();
+    uint32_t t0;
+    uint16_t raw[3];
+
+    if (n == s_adc_seen) { return; }
+    s_adc_seen = n;
+
+    t0 = bsp_prof_now();
+    bsp_adc_get_raw(raw);
+    mid_current_update(raw);
+    bsp_prof_add(PROF_CONV, t0);
+}
+
+/* ------------------------------------------------------------------ */
 /* VOFA+ waveform task                                                 */
 /* ------------------------------------------------------------------ */
 static void task_wave(uint32_t now)
 {
-    float    ch[6];
-    float    pos, frac, v0, v1;
-    uint16_t i0;
+    float    ch[7];
+    float    a, b, c;
+    uint32_t t0;
+    const current_sample_t *cs;
 
     if (!s_st.wave_on) { return; }
 
@@ -229,31 +282,26 @@ static void task_wave(uint32_t now)
     if ((uint32_t)(now - s_t_wave) < (uint32_t)s_wave_period_ms) { return; }
     s_t_wave = now;
 
-    /* 1Hz test sine: phase advances by f/rate per frame.
-     * Linear interpolation between table entries - at 500Hz a raw 64-entry
-     * table repeats each value for ~8 frames and looks like a staircase. */
-    s_wave_phase01 += (1.0f / (float)s_st.wave_rate_hz);
-    if (s_wave_phase01 >= 1.0f) { s_wave_phase01 -= 1.0f; }
-    pos = s_wave_phase01 * 64.0f;
-    i0  = (uint16_t)pos;
-    if (i0 > 63u) { i0 = 63u; }
-    frac = pos - (float)i0;
-    v0   = (float)s_sin_tab[i0];
-    v1   = (float)s_sin_tab[(uint16_t)((i0 + 1u) & 63u)];
-    v0   = v0 + ((v1 - v0) * frac);
+    t0 = bsp_prof_now();
 
-    ch[0] = (float)now / 1000.0f;              /* uptime, s */
-    ch[1] = (float)s_st.state;                 /* state machine */
-    ch[2] = (float)s_st.mode;                  /* control mode */
-    ch[3] = (float)s_st.key_cnt;               /* key press count */
-    ch[4] = v0;                                /* 1Hz test sine, +-1000 */
-    ch[5] = (float)s_st.loop_khz;              /* main loop rate, kHz */
+    bsp_pwm_get_duty(&a, &b, &c);
+    cs = mid_current_get();
 
-    if (vofa_send(ch, 6u) != 0u) {
+    ch[0] = (float)now / 1000.0f;      /* uptime, s            */
+    ch[1] = a;                         /* duty A               */
+    ch[2] = b;                         /* duty B               */
+    ch[3] = c;                         /* duty C               */
+    ch[4] = cs->ia;                    /* phase currents, A    */
+    ch[5] = cs->ib;
+    ch[6] = cs->ic;
+
+    if (vofa_send(ch, 7u) != 0u) {
         s_st.wave_frames++;
     } else {
         s_st.wave_drop++;
     }
+
+    bsp_prof_add(PROF_WAVE, t0);
 }
 
 /* ------------------------------------------------------------------ */
@@ -261,19 +309,27 @@ static void task_wave(uint32_t now)
 /* ------------------------------------------------------------------ */
 void app_loop(void)
 {
-    uint32_t now = HAL_GetTick();
+    uint32_t now    = HAL_GetTick();
+    uint32_t t_loop = bsp_prof_now();
+    uint32_t t;
 
     s_st.uptime_ms = now;
 
     bsp_key_poll(now);
     key_action();
 
+    t = bsp_prof_now();
     app_cmd_poll();
+    bsp_prof_add(PROF_CMD, t);
 
+    t = bsp_prof_now();
     bsp_uart_tx_pump();
+    bsp_prof_add(PROF_TXPUMP, t);
 
+    task_adc();
     task_1ms(now);
     task_wave(now);
 
     s_loop_cnt++;
+    bsp_prof_add(PROF_LOOP, t_loop);
 }

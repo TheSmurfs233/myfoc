@@ -274,7 +274,7 @@
               <OCR_RVCT4>
                 <Type>1</Type>
                 <StartAddress>0x8000000</StartAddress>
-                <Size>0x20000</Size>
+                <Size>0x1f800</Size>
               </OCR_RVCT4>
               <OCR_RVCT5>
                 <Type>1</Type>
@@ -451,6 +451,26 @@
               <FilePath>../User/Bsp/bsp_uart.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_pwm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_pwm.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_flash.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_flash.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_adc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_adc.c</FilePath>
+            </File>
+            <File>
+              <FileName>bsp_prof.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_prof.c</FilePath>
+            </File>
+            <File>
               <FileName>mid_ringbuf.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Mid/mid_ringbuf.c</FilePath>
@@ -464,6 +484,11 @@
               <FileName>mid_vofa.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Mid/mid_vofa.c</FilePath>
+            </File>
+            <File>
+              <FileName>mid_current.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Mid/mid_current.c</FilePath>
             </File>
             <File>
               <FileName>app_main.c</FileName>

@@ -11,6 +11,12 @@
   *   app -> tx_ring -> bsp_uart_tx_pump() (main loop)
   *       -> tx_dma_buf -> DMA1_CH2 (NORMAL) -> USART1(PB6)
   *
+  *   s_tx_busy is cleared only by HAL_UART_TxCpltCallback. A lost completion
+  *   event would silence the link forever, so the pump owns a watchdog
+  *   (DBG_TX_STUCK_MS): once a chunk has clearly overrun its duration it
+  *   aborts the transfer and releases the flag.
+  *   bsp_uart_tx_stuck_count() reports how often that happened.
+  *
   * DMA mode note:
   *   CubeMX generates DMA_NORMAL for RX. bsp_uart_init() switches it to
   *   CIRCULAR at runtime without touching the .ioc. If CubeMX regenerates the
@@ -41,6 +47,8 @@ static uint8_t   s_tx_ring_mem[DBG_TX_RING_SIZE];
 static ringbuf_t s_tx_ring;
 static uint8_t   s_tx_dma_buf[DBG_TX_DMA_CHUNK];
 static volatile uint8_t s_tx_busy;              /* 1 = DMA transmit in flight */
+static uint32_t  s_tx_start_ms;                 /* when s_tx_busy was set */
+static uint32_t  s_tx_stuck_cnt;                /* watchdog recoveries */
 
 /* ------------------------------------------------------------------ */
 /* Init                                                                */
@@ -52,6 +60,8 @@ void bsp_uart_init(void)
     s_rx_last_pos = 0u;
     s_rx_drop_cnt = 0u;
     s_tx_busy     = 0u;
+    s_tx_start_ms = 0u;
+    s_tx_stuck_cnt = 0u;
 
     /* Switch RX DMA to CIRCULAR (overrides the CubeMX-generated NORMAL).
      * CCR is only programmed inside HAL_DMA_Init (DMA_SetConfig on every start
@@ -78,12 +88,24 @@ void bsp_uart_tx_pump(void)
 {
     uint16_t n;
 
-    if (s_tx_busy) { return; }
+    if (s_tx_busy) {
+        /* The completion callback is the only thing that clears s_tx_busy.
+         * If it never arrives (UART error during TX, DMA channel glitch) the
+         * whole debug link would stay silent forever. Force recovery once the
+         * transfer has clearly overrun its duration. */
+        if ((uint32_t)(HAL_GetTick() - s_tx_start_ms) < (uint32_t)DBG_TX_STUCK_MS) {
+            return;
+        }
+        (void)HAL_UART_AbortTransmit(&huart1);
+        s_tx_busy = 0u;
+        s_tx_stuck_cnt++;
+    }
 
     n = ring_peek(&s_tx_ring, s_tx_dma_buf, DBG_TX_DMA_CHUNK);
     if (n == 0u) { return; }
 
-    s_tx_busy = 1u;
+    s_tx_busy     = 1u;
+    s_tx_start_ms = HAL_GetTick();
     if (HAL_UART_Transmit_DMA(&huart1, s_tx_dma_buf, n) != HAL_OK) {
         /* UART still busy: keep the data queued, retry next round */
         s_tx_busy = 0u;
@@ -106,6 +128,11 @@ uint16_t bsp_uart_tx_space(void)
 uint8_t bsp_uart_tx_idle(void)
 {
     return ((s_tx_busy == 0u) && (ring_avail(&s_tx_ring) == 0u)) ? 1u : 0u;
+}
+
+uint32_t bsp_uart_tx_stuck_count(void)
+{
+    return s_tx_stuck_cnt;
 }
 
 /* ------------------------------------------------------------------ */

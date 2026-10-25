@@ -130,17 +130,15 @@ static uint16_t append_field(char *out, uint16_t n, uint16_t cap,
 /* ------------------------------------------------------------------ */
 /* main entry                                                          */
 /* ------------------------------------------------------------------ */
-void log_printf(const char *fmt, ...)
+static void log_emit(const char *fmt, va_list ap)
 {
     char        num[24];
     uint16_t    n = LOG_PREFIX_LEN;                     /* reserve the marker */
     const uint16_t cap = (uint16_t)(LOG_BUF_SIZE - 2u); /* room for CRLF */
-    va_list     ap;
     uint8_t     i;
     uint16_t    k;
 
     if (fmt == NULL) { return; }
-    va_start(ap, fmt);
 
     while ((*fmt != '\0') && (n < cap)) {
         char c = *fmt++;
@@ -228,8 +226,6 @@ void log_printf(const char *fmt, ...)
         }
     }
 
-    va_end(ap);
-
     if (n == LOG_PREFIX_LEN) {
         /* Empty format: emit a bare blank line without the marker */
         s_log_buf[0] = '\r';
@@ -238,7 +234,10 @@ void log_printf(const char *fmt, ...)
     } else {
         /* Prepend the "[log] " marker now that we know the line is not empty */
         for (i = 0u; i < LOG_PREFIX_LEN; i++) { s_log_buf[i] = LOG_PREFIX[i]; }
-        /* Never let a log line look like FireWater data: ':' -> ';' */
+        /* Never let a log line look like FireWater data: ':' -> ';'.
+         * Applies to every line, including the build timestamp: VOFA+'s
+         * FireWater parser cuts a line at the colon, so a "13:57:08" would
+         * show up truncated there. */
         for (k = LOG_PREFIX_LEN; k < n; k++) {
             if (s_log_buf[k] == ':') { s_log_buf[k] = ';'; }
         }
@@ -249,6 +248,16 @@ void log_printf(const char *fmt, ...)
     /* All or nothing: a truncated line would leave the CSV stream broken. */
     if (bsp_uart_tx_space() < n) { return; }
     (void)bsp_uart_tx_write((const uint8_t *)s_log_buf, n);
+}
+
+void log_printf(const char *fmt, ...)
+{
+    va_list ap;
+
+    if (fmt == NULL) { return; }
+    va_start(ap, fmt);
+    log_emit(fmt, ap);
+    va_end(ap);
 }
 
 void log_str(const char *s)

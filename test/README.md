@@ -8,7 +8,7 @@
 ## 1. 一分钟上手
 
 ```bash
-cd D:/Embedded/STM32/wb_foc
+cd D:/Embedded/STM32/dsh_foc
 bash test/host/build.sh
 ```
 
@@ -20,7 +20,7 @@ bash test/host/build.sh
   ringbuf: basic push/pop                   ok
   ...
 ============================
-checks: 156   failed: 0
+checks: 302   failed: 0
 RESULT: PASS
 ```
 
@@ -40,7 +40,9 @@ test/host/
   build.sh              编译 + 运行（一条命令）
   test_main.c           所有测试用例
   fake/
-    stm32g4xx_hal.h     HAL 桩：GPIO / DMA / UART 的最小类型与函数
+    stm32g4xx_hal.h     HAL 桩：GPIO / DMA / UART / ADC / DWT 的最小类型与函数
+    tim.h               TIM1 寄存器模型（CCR/CCER/BDTR/EGR），给 bsp_pwm 用
+    adc.h               影子 adc.h，只提供 hadc2
     main.h              影子头文件，覆盖 Core/Inc/main.h（提供 LED/KEY 引脚宏）
     usart.h             影子头文件，提供 huart1 / USART1
     fake_api.h          测试钩子（时间、按键、TX 捕获、RX 注入）
@@ -75,16 +77,20 @@ test/host/
 
 ---
 
-## 4. 覆盖范围（S1，156 条断言）
+## 4. 覆盖范围（S1~S3，278 条断言）
 
 | 模块 | 测了什么 |
 |---|---|
 | `mid_ringbuf` | 基本收发、满截断、回绕、peek 在边界截断、非 2 的幂拒绝、**20 万次随机操作对拍参考模型** |
-| `mid_log` | `%d %i %u %x %X %s %c %f %%`、负数、`INT32_MIN`、宽度/补零/左对齐、`%f` 两位小数、精度修饰被吞、未知格式符透传、128 字节截断、空格式 |
-| `mid_vofa` | 1/3/6 通道**逐字节**比对 JustFloat 帧（含 `00 00 80 7F` 帧尾）、非法通道数拒绝 |
-| `bsp_uart` | TX 64 字节分块（200B → 64/64/64/8 共 4 次）、环容量上限 4095、`HAL_BUSY` 重试不丢数据、RX 注入、**160B 穿过 128B 缓冲的回绕**、RX 溢出计数 |
+| `mid_log` | `%d %i %u %x %X %s %c %f %%`、负数、`INT32_MIN`、宽度/补零/左对齐、`%f` 两位小数、精度修饰被吞、未知格式符透传、128 字节截断、空格式、**每条日志统一加 `[log] ` 前缀** |
+| `mid_vofa` | 1/3/6 通道 **FireWater 纯 CSV 逐字节**比对（`1.500\n`、`1.000,-1.000,0.000\n`、`\n` 结尾、帧长有界）、非法通道数拒绝 |
+| `bsp_uart` | TX 64 字节分块（200B → 64/64/64/8 共 4 次）、环容量上限 4095、`HAL_BUSY` 重试不丢数据、**TX 看门狗从丢失的完成事件中恢复**（不发 `TxCplt` → 超时 `DBG_TX_STUCK_MS` → abort + 继续）、RX 注入、**160B 穿过 128B 缓冲的回绕**、RX 溢出计数 |
 | `bsp_gpio` | LED 低有效极性（PF1 低 = 亮）、20ms 消抖窗口内不触发、超过窗口只触发一次、长按不重复、松开事件 |
-| `app_main` | 模式范围校验、未选模式拒绝启动、运行中禁止切模式、波形速率钳位（0→1，3000→1000）、**1 秒 @1kHz 恰好 1000 帧 = 28000 字节** |
+| `bsp_pwm` | `duty→CCR` 按 PWM2 反比映射（0.1→3825、0.5→2125、0.9→425）、0%/100% 与 NaN 钳到 `PWM_CCR_MIN/MAX`、`CCR→duty` 往返、`init` 后 MOE=0/CCxE=0/CCR=50%/CCR4 不被覆盖/计数器已启动、`enable` 置 MOE+全部 CCxE、`disable` 只清 MOE 与 CCxE（duty 保留）、读回的是钳位后的实际占空比 |
+| `mid_current` | 256 帧零漂校准（差一帧不 ready）、均值取整、`(raw−off)×0.645mA` 正负方向、轨到轨饱和标记、重新校准回到未就绪 |
+| `bsp_prof` | 显式周期数的 min/avg/max、空槽读 0、enable/disable、reset、`now()`/`add()` 用假 DWT 对拍 |
+| `bsp_adc` | JEOC 回调锁存 JDR1~3、帧计数、OVR 计数并清除 |
+| `app_main` | 模式范围校验、未选模式拒绝启动、运行中禁止切模式、波形速率钳位（0→1，3000→500）、**1 秒 @500Hz 恰好 500 帧、drop=0** |
 | `app_cmd` | help/ver/stat、mode-start-stop 全流程、各种错误路径、未知命令、LED 控制、echo、退格编辑、超长行、空行忽略、一次收到多条命令 |
 
 ---
@@ -132,6 +138,28 @@ static void test_clarke(void)
 1. 在 `test_main.c` 里写 `static void test_xxx(void)`，用 `section()` / `T()` 断言
 2. 在 `main()` 里加一行调用
 3. `bash test/host/build.sh`
+
+---
+
+## 6.5 台架验收脚本（`test/accept/`）
+
+真机串口自动化，需要板子、烧录好的固件和空闲串口：
+
+| 脚本 | 覆盖 | 断言数 |
+|---|---|---|
+| `s1_accept.py` | help/ver/stat、FireWater 禁冒号、按键/LED、状态机、`rate`、7 通道波形、丢帧 | 61 |
+| `s2_accept.py` | PWM 命令、占空比钳位、启停、封波、行数回归 | 25 |
+| `s3_accept.py` | 校准生命周期（erase→start→live→gen）、帧率、`pwm` 保护、DWT 时序画像 | 16 |
+
+```bash
+python test/accept/s3_accept.py COM7 1000000
+```
+
+> 帧率用**板子自己的 `uptime`** 计算（`stat` 里 `frames` 与 `uptime` 同一时刻采样），
+> 不要用 PC 侧时间戳——命令往返 0.2s 会带来 4~8% 误差（踩过）。
+
+主机侧目录里另有 `fake/bsp_flash_fake.c`：主机无法映射 `0x0801F800`，
+所以链接时用它替换真实的 `bsp_flash.c`，**生产代码里不留任何测试分支**。
 
 ---
 

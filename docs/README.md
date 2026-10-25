@@ -47,13 +47,15 @@ STM32G431KB + MT6701 + 3×INA240A2 的 FOC 无刷电机控制工程文档。
 
 ```bash
 "D:/installfile/Keil_v5/UV4/UV4.exe" -b \
-  "D:/Embedded/STM32/wb_foc/MDK-ARM/myfoc.uvprojx" -j0 -o \
-  "D:/Embedded/STM32/wb_foc/MDK-ARM/build.log"
+  "D:/Embedded/STM32/dsh_foc/MDK-ARM/myfoc.uvprojx" -j0 -o \
+  "D:/Embedded/STM32/dsh_foc/MDK-ARM/build.log"
 ```
 
 - 返回码 `0` = 成功；`1` = 有警告；`2` = 有错误
 - 结果看 `MDK-ARM/build.log`，产物在 `MDK-ARM/myfoc/myfoc.axf` / `.hex`
-- 基线（2026-10-25）：`Code=22886 RO=738 RW=68 ZI=8844`，RAM 占用 8.9KB / 32KB
+- **每次换一个日志文件名**（`build2.log`、`b15.log`…）：Keil GUI 开着时同名 log 可能不被覆盖，
+  会读到上一次的结果。**以返回码为准，别只看 log 内容。**
+- 基线（2026-10-25，S3 / #30）：`Code=28294 RO=702 RW=116 ZI=9052`，RAM 占用 9.0KB / 32KB
 
 ### 源码编码红线（踩过坑）
 
@@ -74,7 +76,7 @@ bash test/host/build.sh
 ```
 
 用 Vitis_HLS 自带的 msys2 mingw64 gcc，把 `User/` 下的纯逻辑模块配上假 HAL 桩，
-编成 x86 程序跑单元测试。当前 **156 条断言全绿**。
+编成 x86 程序跑单元测试。当前 **302 条断言全绿**。
 
 - 覆盖：环形缓冲、日志格式化、VOFA+ 帧、串口收发驱动、按键消抖、状态机、命令解析
 - 详见 [test/README.md](../test/README.md)
@@ -84,6 +86,11 @@ bash test/host/build.sh
 
 - **每次代码改动，同一次提交内更新**：对应框架文档（若接口/参数变了）+ `00_开发日志.md`（新增一条）+ `01_项目进度.md`（状态变了才改）。
 - 开发日志**倒序**（最新在最上方），只增不改。
+- **动手之前先问**（用户 2026-10-25 明确要求）：
+  - **烧录**（`UV4 -f` 或任何写 Flash 的操作）前必须先获得同意；
+  - **打开/占用调试串口**（COM7 等）前也必须先获得同意 —— 串口是独占资源，
+    用户可能在用 VOFA+ 或串口助手。
+  - 一句话：改代码、编译、跑主机测试随时可以做；**碰硬件（烧录 / 开串口）先问一句**。
 - 新增 `【TBD】` 必须同步登记到 `18_待确认清单.md`，解决后打勾并写明结论。
 - 文档里出现的数字（ARR、死区、增益、阈值、缓冲大小、速率上限）必须与代码中的宏**一致**，
   改代码必须同改文档。
@@ -97,3 +104,11 @@ bash test/host/build.sh
   > 2026-10-25 踩过：`DBG_WAVE_RATE_MAX` 从 300 改到 500 后，`help` 文案改了，
   > 但 `docs/15` 命令表、`docs/01`/`docs/18` 的 S6 提醒、`app_main.c` 的注释
   > 都还写着 300Hz —— 被用户发现。
+
+- **不要用 PowerShell 的 `Get-Content` / `WriteAllText` 改 UTF-8 文档**（2026-10-25 踩过）：
+  Windows PowerShell 5.1 的 `Get-Content -Raw` 默认按 **GBK** 解码，再 `WriteAllText` 写成 UTF-8，
+  中文会被二次编码成 `涓€閽?` 这类乱码，而且 GBK 解码失败的字节变成 `?` 后**不可逆**。
+  - 改文档一律用编辑工具（或 Python 显式 `encoding='utf-8'`）；
+  - `git restore` 是唯一的兜底恢复手段（本次丢了 `README.md`/`01`/`00` 三个文件的当日改动，靠重写补回）。
+  - 自检：`python -c "print(open('docs/01_项目进度.md',encoding='utf-8').read().count(chr(0xFFFD)))"`
+    输出必须为 0。

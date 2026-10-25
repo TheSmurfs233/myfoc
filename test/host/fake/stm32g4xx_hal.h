@@ -80,8 +80,46 @@ typedef struct {
 #define HAL_UART_RXEVENT_HT     (0x00000001u)
 #define HAL_UART_RXEVENT_IDLE   (0x00000002u)
 
+/* ---- ADC ---- */
+typedef struct {
+    volatile uint32_t JDR1;
+    volatile uint32_t JDR2;
+    volatile uint32_t JDR3;
+    volatile uint32_t ISR;
+    volatile uint32_t CR;
+    volatile uint32_t CFGR;
+    volatile uint32_t JSQR;
+} ADC_TypeDef;
+
+typedef struct {
+    ADC_TypeDef *Instance;
+} ADC_HandleTypeDef;
+
+extern ADC_TypeDef       fake_adc2_regs;
+extern ADC_HandleTypeDef hadc2;
+#define ADC2            (&fake_adc2_regs)
+#define ADC_ISR_OVR     (1u << 4)
+#define ADC_SINGLE_ENDED 0u
+
+/* ---- DWT cycle counter (used by bsp_prof) ---- */
+typedef struct { volatile uint32_t DEMCR; } CoreDebug_TypeDef;
+typedef struct { volatile uint32_t CTRL; volatile uint32_t CYCCNT; } DWT_TypeDef;
+
+extern CoreDebug_TypeDef fake_coredebug;
+extern DWT_TypeDef       fake_dwt;
+#define CoreDebug (&fake_coredebug)
+#define DWT       (&fake_dwt)
+
+#define CoreDebug_DEMCR_TRCENA_Msk (1u << 24)
+#define DWT_CTRL_CYCCNTENA_Msk     (1u << 0)
+
 /* ---- function stubs ---- */
+/* ---------------- FLASH ---------------- */
+/* The host build links test/host/fake/bsp_flash_fake.c instead of the real
+ * bsp_flash.c, so no HAL flash stubs are needed here. */
+
 uint32_t          HAL_GetTick(void);
+void              HAL_Delay(uint32_t Delay);
 void              HAL_GPIO_Init(GPIO_TypeDef *port, GPIO_InitTypeDef *init);
 void              HAL_GPIO_WritePin(GPIO_TypeDef *port, uint32_t pin, GPIO_PinState state);
 GPIO_PinState     HAL_GPIO_ReadPin(GPIO_TypeDef *port, uint32_t pin);
@@ -90,6 +128,13 @@ HAL_StatusTypeDef HAL_UARTEx_ReceiveToIdle_DMA(UART_HandleTypeDef *huart,
                                                uint8_t *pData, uint16_t size);
 HAL_StatusTypeDef HAL_UART_Transmit_DMA(UART_HandleTypeDef *huart,
                                         uint8_t *pData, uint16_t size);
+/* Used by the TX watchdog in bsp_uart_tx_pump() when a completion is lost */
+HAL_StatusTypeDef HAL_UART_AbortTransmit(UART_HandleTypeDef *huart);
+
+HAL_StatusTypeDef HAL_ADCEx_Calibration_Start(ADC_HandleTypeDef *hadc, uint32_t SingleDiff);
+HAL_StatusTypeDef HAL_ADCEx_InjectedStart_IT(ADC_HandleTypeDef *hadc);
+/* Implemented by bsp_adc.c; called directly by the tests to simulate a JEOC */
+void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc);
 
 #define __HAL_UART_CLEAR_OREFLAG(h) ((void)(h))
 #define __HAL_UART_CLEAR_NEFLAG(h)  ((void)(h))
