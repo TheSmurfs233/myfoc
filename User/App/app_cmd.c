@@ -12,12 +12,14 @@
 #include "app_main.h"
 #include "board_cfg.h"
 #include "bsp_adc.h"
+#include "bsp_cordic.h"
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
 #include "bsp_uart.h"
 #include "mid_current.h"
 #include "mid_log.h"
+#include "mid_trig.h"
 #include "mid_vofa.h"
 
 #include <string.h>
@@ -113,6 +115,8 @@ static void print_help(void)
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
+    log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
+    log_printf(" cordic         dump raw CORDIC readback for 4 angles");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -355,6 +359,50 @@ static void cmd_exec(char *line)
                        (unsigned)(w0 / 10u), (unsigned)(w0 % 10u),
                        (unsigned)(w1 / 10u), (unsigned)(w1 % 10u));
         }
+    }
+    /* ---------------- trig ----------------- */
+    else if (strcmp(tok[0], "trig") == 0) {
+        const uint32_t n_iter = 1000u;
+        uint32_t t0;
+        uint32_t cyc;
+        uint32_t per;
+        uint32_t ns;
+        float    th = 0.0f;
+        float    c = 0.0f;
+        float    s = 0.0f;
+        uint32_t i;
+
+        t0 = bsp_prof_now();
+        for (i = 0u; i < n_iter; i++) {
+            mid_trig_cos_sin(th, &c, &s);
+            th += 0.01f;
+        }
+        cyc = bsp_prof_now() - t0;
+        per = cyc / n_iter;
+        ns  = (per * 100u) / 17u;              /* 170 cycles = 1us */
+
+        log_printf("trig = %s, %u cycles/call, %u ns, cos1000=%d sin1000=%d",
+                   mid_trig_name(), (unsigned)per, (unsigned)ns,
+                   (int)(c * 1000.0f), (int)(s * 1000.0f));
+    }
+    /* ---------------- cordic ----------------- */
+    else if (strcmp(tok[0], "cordic") == 0) {
+        static const float  ang[4] = { 0.0f, 1.5707963f, 3.1415927f, -1.5707963f };
+        static const char  *nm[4]  = { "0", "pi/2", "pi", "-pi/2" };
+        uint8_t i;
+
+        log_printf("---- cordic raw readback ----");
+        for (i = 0u; i < 4u; i++) {
+            int32_t c32 = 0;
+            int32_t s32 = 0;
+            float   c = 0.0f;
+            float   s = 0.0f;
+
+            bsp_cordic_cos_sin_raw(ang[i], &c, &s, &c32, &s32);
+            log_printf(" th=%-5s c=%08x s=%08x", nm[i],
+                       (unsigned)c32, (unsigned)s32);
+        }
+        log_printf("-----------------------------");
     }
     /* ---------------- cur ----------------- */
     else if (strcmp(tok[0], "cur") == 0) {

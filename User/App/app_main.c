@@ -29,6 +29,7 @@
 #include "bsp_uart.h"
 #include "mid_current.h"
 #include "mid_log.h"
+#include "mid_trig.h"
 #include <math.h>
 #include "mid_vofa.h"
 
@@ -47,6 +48,7 @@ static alg_vf_t      s_vf;
 static app_vf_info_t s_vf_info;
 static uint16_t      s_i_fold_cnt;
 static uint16_t      s_i_trip_cnt;
+static uint8_t       s_trig_status;     /* mid_trig_init() result */
 
 /* ---- where each control step lands inside the 50us PWM period ---- */
 static app_phase_info_t s_phase;
@@ -179,6 +181,7 @@ void app_init(void)
     /* ---- peripherals ---- */
     bsp_sys_init();          /* ART: flash prefetch + I-cache, must be first */
     bsp_prof_init();         /* DWT cycle counter, must be first */
+    s_trig_status = mid_trig_init();   /* LUT: always OK; CORDIC: self-test */
     bsp_gpio_init();
     bsp_uart_init();
     bsp_pwm_init();          /* counter runs, six outputs stay off (MOE=0) */
@@ -200,6 +203,8 @@ void app_init(void)
                (unsigned)FOC_TS_US);
     log_printf(" pwm  = %u Hz (ARR=%u, DTG=%u)",
                (unsigned)PWM_FREQ_HZ_CALC, (unsigned)PWM_ARR, (unsigned)PWM_DTG_REG);
+    log_printf(" trig = %s%s", mid_trig_name(),
+               (s_trig_status != 0u) ? " (SELF TEST FAILED)" : "");
     log_printf(" cur  = Rs=%u mOhm x%u, %u uA/LSB, +-%u mA",
                (unsigned)(RSHUNT_OHM * 1000.0f + 0.5f), (unsigned)INA240_GAIN,
                (unsigned)(CUR_A_PER_LSB * 1000000.0f + 0.5f),

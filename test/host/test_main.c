@@ -34,6 +34,7 @@
 #include "bsp_prof.h"
 #include "alg_svpwm.h"
 #include "alg_vf.h"
+#include "mid_trig.h"
 #include "bsp_uart.h"
 #include "app_main.h"
 #include "app_cmd.h"
@@ -934,6 +935,49 @@ static void test_adc(void)
 /* ================================================================== */
 /* SVPWM (Alg)                                                         */
 /* ================================================================== */
+/* ---- sin/cos back end (Mid) ---- */
+static void test_trig(void)
+{
+    int   i;
+    float worst = 0.0f;
+
+    section("trig: back end exposes a name");
+    T(strcmp(mid_trig_name(), "LUT") == 0 || strcmp(mid_trig_name(), "CORDIC") == 0);
+    T(mid_trig_init() == 0u);
+    section_end();
+
+    section("trig: cos/sin match the C library");
+    for (i = 0; i < 720; i++) {
+        float th = -3.14159265f + (float)i * 6.2831853f / 720.0f;
+        float c, s;
+
+        mid_trig_cos_sin(th, &c, &s);
+        {
+            float dc = fabsf(c - cosf(th));
+            float ds = fabsf(s - sinf(th));
+
+            if (dc > worst) { worst = dc; }
+            if (ds > worst) { worst = ds; }
+        }
+    }
+    /* LUT interpolation error is 7.5e-5 of amplitude; 1e-3 is generous. */
+    T(worst < 1e-3f);
+    section_end();
+
+    section("trig: angles outside [0, 2pi) are wrapped");
+    {
+        float c1, s1, c2, s2;
+
+        mid_trig_cos_sin(0.5f, &c1, &s1);
+        mid_trig_cos_sin(0.5f + 6.2831853f * 3.0f, &c2, &s2);
+        T(fabsf(c1 - c2) < 1e-4f);
+        T(fabsf(s1 - s2) < 1e-4f);
+        mid_trig_cos_sin(0.5f - 6.2831853f * 2.0f, &c2, &s2);
+        T(fabsf(c1 - c2) < 1e-4f);
+    }
+    section_end();
+}
+
 /* cosf-based reference, used only to cross-check the lookup table. */
 static void ref_svpwm(float theta, float m, float duty[3])
 {
@@ -1423,6 +1467,13 @@ static void test_cmd(void)
     T(tx_contains("OK phase reset"));
     section_end();
 
+    section("cmd: trig benchmark");
+    tx_clear();
+    cmd_feed("trig\r\n");
+    T(tx_contains("trig = "));
+    T(tx_contains("cycles/call"));
+    section_end();
+
     section("cmd: unknown command");
     tx_clear();
     cmd_feed("foobar\r\n");
@@ -1508,6 +1559,7 @@ int main(void)
     printf("\n[profiler]\n");        test_prof();
     printf("\n[adc]\n");             test_adc();
     printf("\n[svpwm]\n");           test_svpwm();
+    printf("\n[trig]\n");            test_trig();
     printf("\n[v/f]\n");             test_vf();
     printf("\n[app state machine]\n"); test_app();
     printf("\n[command parser]\n");  test_cmd();

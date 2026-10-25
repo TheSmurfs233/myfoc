@@ -27,6 +27,7 @@ SRC="$HERE/test_main.c
      $ROOT/User/Mid/mid_log.c
      $ROOT/User/Mid/mid_vofa.c
      $ROOT/User/Mid/mid_current.c
+     $ROOT/User/Mid/mid_trig.c
      $ROOT/User/Alg/alg_svpwm.c
      $ROOT/User/Alg/alg_vf.c
      $ROOT/User/Bsp/bsp_gpio.c

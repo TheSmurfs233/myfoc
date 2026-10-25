@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             39u
+#define FW_BUILD_ID             44u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -176,6 +176,20 @@ extern "C" {
 #define VF_I_FOLD_FRAMES        20u             /* consecutive frames */
 #define VF_I_TRIP_FRAMES        5u
 #define VF_M_SCALE_MIN          0.30f
+
+/* ==========================================================================
+ * 6. Trigonometry back end (S4 bench experiment)
+ *    TRIG_MODE_LUT    : 256-entry table + linear interpolation (default)
+ *    TRIG_MODE_CORDIC : hardware CORDIC co-processor
+ *    Switching is a one-line rebuild; the LUT stays the default so the
+ *    verified behaviour does not change unless explicitly asked for.
+ * ========================================================================== */
+#define TRIG_MODE_LUT           0
+#define TRIG_MODE_CORDIC        1
+
+#ifndef TRIG_MODE
+#define TRIG_MODE               TRIG_MODE_LUT
+#endif
 
 /* ==========================================================================
  * 5. LED / KEY
