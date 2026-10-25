@@ -19,6 +19,8 @@
 #include "app_main.h"
 #include "app_cmd.h"
 #include "board_cfg.h"
+#include "alg_svpwm.h"
+#include "alg_vf.h"
 #include "bsp_adc.h"
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
@@ -26,6 +28,7 @@
 #include "bsp_uart.h"
 #include "mid_current.h"
 #include "mid_log.h"
+#include <math.h>
 #include "mid_vofa.h"
 
 /* ------------------------------------------------------------------ */
@@ -37,6 +40,12 @@ static uint32_t     s_t_1ms;
 static uint32_t     s_t_wave;
 static uint16_t     s_wave_period_ms; /* upload period in ms */
 static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
+
+/* ---- open-loop V/f (S4) ---- */
+static alg_vf_t      s_vf;
+static app_vf_info_t s_vf_info;
+static uint16_t      s_i_fold_cnt;
+static uint16_t      s_i_trip_cnt;
 
 /* ------------------------------------------------------------------ */
 /* Name helpers                                                        */
@@ -84,6 +93,16 @@ void app_init(void)
     s_t_wave         = s_t_1ms;
     s_wave_period_ms = (uint16_t)(1000u / s_st.wave_rate_hz);
     s_adc_seen       = 0u;
+
+    alg_vf_init(&s_vf);
+    s_vf_info.on       = 0u;
+    s_vf_info.dir      = 0u;
+    s_vf_info.f_hz     = 0.0f;
+    s_vf_info.f_target = 0.0f;
+    s_vf_info.m        = 0.0f;
+    s_vf_info.i_max    = 0.0f;
+    s_i_fold_cnt       = 0u;
+    s_i_trip_cnt       = 0u;
 
     /* ---- peripherals ---- */
     bsp_prof_init();         /* DWT cycle counter, must be first */
@@ -174,9 +193,17 @@ uint8_t app_start(void)
 
 uint8_t app_stop(void)
 {
+    alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
+    s_vf_info.on       = 0u;
+    s_vf_info.f_hz     = 0.0f;
+    s_vf_info.f_target = 0.0f;
+    s_vf_info.m        = 0.0f;
+    s_i_fold_cnt       = 0u;
+    s_i_trip_cnt       = 0u;
+
     bsp_pwm_disable();                   /* MOE=0 first: six outputs low */
     bsp_pwm_set_all_duty(PWM_START_DUTY);
-    s_st.state = APP_ST_IDLE;
+    s_st.state = APP_ST_IDLE;            /* also clears FAULT */
     return 0u;
 }
 
@@ -187,6 +214,131 @@ uint8_t app_set_mode(uint8_t m)
     s_st.mode  = m;
     s_st.state = APP_ST_IDLE;
     return 0u;
+}
+
+/* ------------------------------------------------------------------ */
+/* Open-loop V/f (S4)                                                  */
+/* ------------------------------------------------------------------ */
+uint8_t app_vf_set(float hz)
+{
+    if (s_st.state != APP_ST_RUN) {
+        return 2u;                       /* bridge not running */
+    }
+    if (mid_current_get()->ready == 0u) {
+        return 3u;                       /* zero drift still being measured */
+    }
+    alg_vf_start(&s_vf, hz);
+    s_i_fold_cnt = 0u;
+    s_i_trip_cnt = 0u;
+
+    /* Publish immediately: "pwm" is refused while vf is on, and that check
+     * must not wait for the next ADC frame. */
+    s_vf_info.on       = 1u;
+    s_vf_info.dir      = s_vf.dir;
+    s_vf_info.f_target = s_vf.f_target;
+    s_vf_info.f_hz     = s_vf.f_hz;
+    s_vf_info.m        = 0.0f;
+    return 0u;
+}
+
+uint8_t app_vf_off(void)
+{
+    alg_vf_stop(&s_vf);
+    s_vf_info.on       = 0u;
+    s_vf_info.f_hz     = 0.0f;
+    s_vf_info.f_target = 0.0f;
+    s_vf_info.m        = 0.0f;
+    s_vf_info.i_max    = 0.0f;
+    if (s_st.state == APP_ST_RUN) {
+        bsp_pwm_set_all_duty(PWM_START_DUTY);
+    }
+    return 0u;
+}
+
+void app_vf_set_acc(float hz_per_s)
+{
+    if (hz_per_s < VF_ACC_MIN_HZ_PER_S) { hz_per_s = VF_ACC_MIN_HZ_PER_S; }
+    if (hz_per_s > VF_ACC_MAX_HZ_PER_S) { hz_per_s = VF_ACC_MAX_HZ_PER_S; }
+    s_vf.acc_hz_s = hz_per_s;
+}
+
+uint8_t app_vf_set_dir(uint8_t dir)
+{
+    if (dir > 1u) { return 1u; }
+    s_vf.dir = dir;
+    s_vf_info.dir = dir;
+    return 0u;
+}
+
+const app_vf_info_t *app_vf_info(void)
+{
+    return &s_vf_info;
+}
+
+/* One V/f step per ADC frame (20kHz). ts is exact, so the angle integration
+ * has no jitter; S6 will move this into the ADC interrupt. */
+static void task_vf(void)
+{
+    const current_sample_t *cs;
+    float theta;
+    float m;
+    float duty[3];
+    float imax;
+    float t;
+
+    if (s_vf.on == 0u) {
+        return;
+    }
+
+    theta = alg_vf_step(&s_vf, VF_TS_S);
+
+    /* ---- current guard: there is no hardware protection until S7 ---- */
+    cs = mid_current_get();
+    imax = fabsf(cs->ia);
+    t = fabsf(cs->ib); if (t > imax) { imax = t; }
+    t = fabsf(cs->ic); if (t > imax) { imax = t; }
+
+    if (imax >= VF_I_TRIP_A) {
+        if (++s_i_trip_cnt >= VF_I_TRIP_FRAMES) {
+            alg_vf_stop(&s_vf);
+            bsp_pwm_disable();           /* MOE=0 immediately */
+            bsp_pwm_set_all_duty(PWM_START_DUTY);
+            s_st.state           = APP_ST_FAULT;
+            s_vf_info.on         = 0u;
+            s_vf_info.m          = 0.0f;
+            s_i_trip_cnt         = 0u;
+            log_printf("ERR overcurrent trip I=%d mA, type stop to reset",
+                       (int)(imax * 1000.0f));
+            return;
+        }
+    } else {
+        s_i_trip_cnt = 0u;
+    }
+
+    if (imax > VF_I_FOLD_A) {
+        if (++s_i_fold_cnt >= VF_I_FOLD_FRAMES) {
+            s_i_fold_cnt = 0u;
+            s_vf.m_scale *= 0.98f;
+            if (s_vf.m_scale < VF_M_SCALE_MIN) { s_vf.m_scale = VF_M_SCALE_MIN; }
+        }
+    } else {
+        s_i_fold_cnt = 0u;
+        if (imax < VF_I_FOLD_BACK_A) {
+            s_vf.m_scale *= 1.001f;
+            if (s_vf.m_scale > 1.0f) { s_vf.m_scale = 1.0f; }
+        }
+    }
+
+    m = alg_vf_mod_index(&s_vf);
+    alg_svpwm(theta, m, duty);
+    bsp_pwm_set_duty(duty[0], duty[1], duty[2]);
+
+    s_vf_info.on       = 1u;
+    s_vf_info.dir      = s_vf.dir;
+    s_vf_info.f_hz     = s_vf.f_hz;
+    s_vf_info.f_target = s_vf.f_target;
+    s_vf_info.m        = m;
+    s_vf_info.i_max    = imax;
 }
 
 void app_wave_set(uint8_t on, uint16_t rate_hz)
@@ -264,6 +416,10 @@ static void task_adc(void)
     bsp_adc_get_raw(raw);
     mid_current_update(raw);
     bsp_prof_add(PROF_CONV, t0);
+
+    /* S4: the V/f ramp runs once per ADC frame, right after the currents are
+     * fresh. S6 will fold the current loop into the same place. */
+    task_vf();
 }
 
 /* ------------------------------------------------------------------ */

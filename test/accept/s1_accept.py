@@ -130,7 +130,7 @@ def main():
     # ---------- 1. help ----------
     out = lk.send("help")
     ls = lines(out)
-    check("help: 18 lines", len(ls) == 18, "got %d" % len(ls))
+    check("help: 22 lines", len(ls) == 22, "got %d" % len(ls))
     check("help: first line", ls and ls[0] == "[log] ---- commands ----", ls[0] if ls else "-")
     check("help: last line", ls and ls[-1] == "[log] ------------------", ls[-1] if ls else "-")
     check("help: rate says 1..500",
@@ -140,6 +140,9 @@ def main():
     check("help: cur / cal / prof listed",
           any(" cur " in x for x in ls) and any(" cal " in x for x in ls) and
           any(" prof " in x for x in ls))
+    check("help: vf / acc / dir listed",
+          any(" vf " in x for x in ls) and any(" acc " in x for x in ls) and
+          any(" dir " in x for x in ls))
     check("help: all lines carry [log] marker", all(x.startswith("[log] ") for x in ls))
 
     # ---------- 2. FireWater text rule: no colon anywhere ----------
@@ -199,11 +202,12 @@ def main():
     # ---------- 4. stat ----------
     out = lk.send("stat")
     ls = lines(out)
-    check("stat: 12 lines", len(ls) == 12, "got %d" % len(ls))
+    check("stat: 13 lines", len(ls) == 13, "got %d" % len(ls))
     check("stat: state IDLE", any("state    = IDLE" in x for x in ls))
     check("stat: mode IDLE", any("mode     = IDLE" in x for x in ls))
     check("stat: pwm line present and OFF", any("pwm      = OFF" in x for x in ls))
     check("stat: adc line present", any("adc      = frames=" in x for x in ls))
+    check("stat: vf line present", any("vf       =" in x for x in ls))
     check("stat: no ':' in any line", not [x for x in ls if ":" in x])
     m = [x for x in ls if "loop     =" in x]
     check("stat: loop rate sane (100..900 kHz)",

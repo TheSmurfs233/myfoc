@@ -50,6 +50,16 @@ typedef struct {
     uint32_t tx_pending;
 } app_status_t;
 
+/* Open-loop V/f snapshot (S4), filled once per ADC frame while modulating. */
+typedef struct {
+    uint8_t on;          /* 1 = V/f is driving the bridge */
+    uint8_t dir;         /* 0/1: 1 = reversed phase sequence */
+    float   f_hz;        /* present electrical frequency */
+    float   f_target;    /* ramp target */
+    float   m;           /* modulation index actually applied */
+    float   i_max;       /* largest of |ia|,|ib|,|ic| this frame */
+} app_vf_info_t;
+
 void                app_init(void);
 void                app_loop(void);
 
@@ -61,6 +71,14 @@ uint8_t app_stop(void);
 uint8_t app_set_mode(uint8_t m);
 void    app_wave_set(uint8_t on, uint16_t rate_hz);
 void    app_counters_clear(void);
+
+/* Open-loop V/f. set() starts modulating towards hz.
+ * Returns: 0 = OK, 2 = not running (send start first), 3 = still calibrating. */
+uint8_t app_vf_set(float hz);
+uint8_t app_vf_off(void);
+void    app_vf_set_acc(float hz_per_s);
+uint8_t app_vf_set_dir(uint8_t dir);
+const app_vf_info_t *app_vf_info(void);
 
 const char *app_state_name(uint8_t st);
 const char *app_mode_name(uint8_t m);

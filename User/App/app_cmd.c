@@ -106,6 +106,10 @@ static void print_help(void)
     log_printf(" pwm <d>        all three duties 0..1 (needs start)");
     log_printf(" pwm <a> <b> <c> three independent duties");
     log_printf(" cur            raw codes and phase currents");
+    log_printf(" vf <hz>        open-loop V/f target, electrical Hz (needs start)");
+    log_printf(" vf off         stop modulating, back to the 50%% zero vector");
+    log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
+    log_printf(" dir <0|1>      phase sequence: 1 reverses the rotation");
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
@@ -171,6 +175,12 @@ static void print_stat(void)
     log_printf(" led      = %s", bsp_led_is_on() ? "ON" : "OFF");
     log_printf(" key      = down=%u total=%u",
                (unsigned)bsp_key_is_down(), (unsigned)st->key_cnt);
+    {
+        const app_vf_info_t *v = app_vf_info();
+        log_printf(" vf       = %s %.1f/%.1f Hz, m=%.2f, I=%.2f A, dir=%u",
+                   v->on ? "ON" : "OFF", v->f_hz, v->f_target, v->m,
+                   v->i_max, (unsigned)v->dir);
+    }
     log_printf(" loop     = %u kHz", (unsigned)st->loop_khz);
     log_printf(" wave     = %s @ %u Hz, frames=%u drop=%u",
                st->wave_on ? "ON" : "OFF",
@@ -239,6 +249,8 @@ static void cmd_exec(char *line)
         if ((n == 2u) || (n == 4u)) {
             if (app_status()->state != APP_ST_RUN) {
                 log_printf("ERR start first");
+            } else if (app_vf_info()->on != 0u) {
+                log_printf("ERR vf active, send 'vf off' first");
             } else if (mid_current_get()->ready == 0u) {
                 log_printf("ERR calibrating, wait");
             } else if (!parse_duty(tok[1], &a)) {
@@ -258,6 +270,59 @@ static void cmd_exec(char *line)
                        (unsigned)bsp_pwm_get_dtg(), a, b, c);
         } else {
             log_printf("ERR usage=pwm <d> | pwm <a> <b> <c>");
+        }
+    }
+    /* ---------------- vf ----------------- */
+    else if (strcmp(tok[0], "vf") == 0) {
+        if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
+            (void)app_vf_off();
+            log_printf("OK vf off, duty 0.50");
+        } else if (n == 2u) {
+            float hz;
+
+            if (!parse_duty(tok[1], &hz)) {
+                log_printf("ERR usage=vf <hz> | vf off");
+            } else {
+                switch (app_vf_set(hz)) {
+                case 0u:
+                    log_printf("OK vf target = %.2f Hz", hz);
+                    break;
+                case 2u:
+                    log_printf("ERR start first");
+                    break;
+                default:
+                    log_printf("ERR calibrating, wait");
+                    break;
+                }
+            }
+        } else {
+            const app_vf_info_t *v = app_vf_info();
+            log_printf("vf = %s %.1f/%.1f Hz, m=%.2f, I=%.2f A, dir=%u",
+                       v->on ? "ON" : "OFF", v->f_hz, v->f_target, v->m,
+                       v->i_max, (unsigned)v->dir);
+        }
+    }
+    /* ---------------- acc ----------------- */
+    else if (strcmp(tok[0], "acc") == 0) {
+        float a;
+
+        if ((n != 2u) || (!parse_duty(tok[1], &a))) {
+            log_printf("ERR usage=acc <hz/s> 1..200");
+        } else {
+            app_vf_set_acc(a);
+            log_printf("OK acc = %.2f Hz/s", a);
+        }
+    }
+    /* ---------------- dir ----------------- */
+    else if (strcmp(tok[0], "dir") == 0) {
+        float a;
+
+        if ((n != 2u) || (!parse_duty(tok[1], &a))) {
+            log_printf("ERR usage=dir <0|1>");
+        } else if (app_vf_set_dir((uint8_t)(a + 0.5f)) != 0u) {
+            log_printf("ERR dir must be 0 or 1");
+        } else {
+            log_printf("OK dir = %u", (unsigned)app_vf_info()->dir);
         }
     }
     /* ---------------- cur ----------------- */

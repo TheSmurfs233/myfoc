@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             30u
+#define FW_BUILD_ID             31u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -147,6 +147,33 @@ extern "C" {
 #define VBUS_OV_V               13.8f           /* 1.15 x nominal */
 #define VBUS_UV_V               9.0f            /* 0.75 x nominal */
 #define VBUS_MAX_MEASURABLE_V   (ADC_VREF * VBUS_DIV_RATIO)   /* 23.1V */
+
+/* ==========================================================================
+ * 5. Open-loop V/f (S4)
+ *    Motor: 7 pole pairs, 12V, 330KV  ->  no-load 3960rpm = 462Hz electrical
+ *    V/f curve: V_LL_rms(f) = VF_BOOST_V + VF_K_V_PER_HZ * f
+ *    The modulation index is derived from the line-to-line RMS voltage:
+ *      V_LL_rms = (sqrt3/2)/sqrt2 * m * Vdc = 0.6124 * m * Vdc
+ *      => m = 1.633 * V_LL_rms / Vdc
+ * ========================================================================== */
+#define VF_BOOST_V              1.5f            /* low-speed IR boost, V_LL_rms */
+#define VF_K_V_PER_HZ           0.026f          /* 12V / 462Hz */
+#define VF_M_PER_V              (1.632993f / VBUS_NOMINAL_V)
+#define VF_M_MAX                0.95f           /* keep 5% headroom before clamping */
+#define VF_F_MAX                200.0f          /* first release: 1714 rpm */
+#define VF_ACC_HZ_PER_S         20.0f           /* 0 -> 200Hz in 10s */
+#define VF_ACC_MIN_HZ_PER_S     1.0f
+#define VF_ACC_MAX_HZ_PER_S     200.0f
+#define VF_TS_S                 (1.0f / 20000.0f)
+
+/* Guard bands: the ADC range is only +-1.32A and the motor would draw 3.5A at
+ * 12V stall, so the open loop must throttle itself before the sensor clips. */
+#define VF_I_FOLD_A             1.00f           /* start folding the modulation */
+#define VF_I_FOLD_BACK_A        0.80f           /* recover below this */
+#define VF_I_TRIP_A             1.25f           /* hard trip -> FAULT */
+#define VF_I_FOLD_FRAMES        20u             /* consecutive frames */
+#define VF_I_TRIP_FRAMES        5u
+#define VF_M_SCALE_MIN          0.30f
 
 /* ==========================================================================
  * 5. LED / KEY

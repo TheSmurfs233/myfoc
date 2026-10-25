@@ -32,6 +32,8 @@
 #include "bsp_pwm.h"
 #include "bsp_adc.h"
 #include "bsp_prof.h"
+#include "alg_svpwm.h"
+#include "alg_vf.h"
 #include "bsp_uart.h"
 #include "app_main.h"
 #include "app_cmd.h"
@@ -899,6 +901,166 @@ static void test_adc(void)
 }
 
 /* ================================================================== */
+/* SVPWM (Alg)                                                         */
+/* ================================================================== */
+static void test_svpwm(void)
+{
+    float d[3];
+    int   i;
+
+    section("svpwm: zero modulation is the 50% zero vector");
+    alg_svpwm(0.0f, 0.0f, d);
+    T(fabsf(d[0] - 0.5f) < 1e-6f);
+    T(fabsf(d[1] - 0.5f) < 1e-6f);
+    T(fabsf(d[2] - 0.5f) < 1e-6f);
+    alg_svpwm(1.234f, 0.0f, d);
+    T(fabsf(d[0] - 0.5f) < 1e-6f && fabsf(d[1] - 0.5f) < 1e-6f);
+    section_end();
+
+    section("svpwm: duties stay in [0,1] and are centred (max+min == 1)");
+    {
+        int bad_range = 0;
+        int bad_centre = 0;
+
+        for (i = 0; i < 720; i++) {
+            float th = (float)i * 3.14159265f / 360.0f;
+            float hi, lo;
+            int k;
+
+            alg_svpwm(th, 1.0f, d);
+            hi = d[0]; lo = d[0];
+            for (k = 0; k < 3; k++) {
+                if (d[k] < -1e-5f || d[k] > 1.00001f) { bad_range++; }
+                if (d[k] > hi) { hi = d[k]; }
+                if (d[k] < lo) { lo = d[k]; }
+            }
+            if (fabsf(hi + lo - 1.0f) > 1e-5f) { bad_centre++; }
+        }
+        T(bad_range == 0);
+        T(bad_centre == 0);
+    }
+    section_end();
+
+    section("svpwm: line-to-line amplitude is 0.866*m");
+    {
+        float max_ll = 0.0f;
+
+        for (i = 0; i < 720; i++) {
+            float th = (float)i * 3.14159265f / 360.0f;
+            float ll;
+
+            alg_svpwm(th, 1.0f, d);
+            ll = fabsf(d[0] - d[1]);
+            if (ll > max_ll) { max_ll = ll; }
+        }
+        /* (sqrt3/2) * m with m = 1 */
+        T(fabsf(max_ll - 0.8660254f) < 0.005f);
+    }
+    section_end();
+
+    section("svpwm: theta = 0 puts phase A on top, B == C");
+    alg_svpwm(0.0f, 1.0f, d);
+    T(d[0] > d[1] && d[0] > d[2]);
+    T(fabsf(d[1] - d[2]) < 1e-6f);
+    T(d[1] > 0.0f && d[0] < 1.0f);         /* never hits the rails */
+    section_end();
+
+    section("svpwm: negating theta swaps B and C (dir == 1)");
+    {
+        float fwd[3], rev[3];
+
+        alg_svpwm(0.7f, 0.8f, fwd);
+        alg_svpwm(-0.7f, 0.8f, rev);
+        T(fabsf(fwd[0] - rev[0]) < 1e-6f);
+        T(fabsf(fwd[1] - rev[2]) < 1e-6f);
+        T(fabsf(fwd[2] - rev[1]) < 1e-6f);
+    }
+    section_end();
+}
+
+/* ================================================================== */
+/* V/f ramp (Alg)                                                      */
+/* ================================================================== */
+static void test_vf(void)
+{
+    alg_vf_t vf;
+    int      i;
+
+    section("vf: ramp runs at the configured rate");
+    alg_vf_init(&vf);
+    alg_vf_start(&vf, 100.0f);
+    for (i = 0; i < 20000; i++) {          /* 1s at 20kHz */
+        (void)alg_vf_step(&vf, 0.00005f);
+    }
+    T(fabsf(vf.f_hz - VF_ACC_HZ_PER_S) < 0.05f);
+    section_end();
+
+    section("vf: ramp stops exactly at the target");
+    for (i = 0; i < 200000; i++) {
+        (void)alg_vf_step(&vf, 0.00005f);
+    }
+    T(fabsf(vf.f_hz - 100.0f) < 1e-3f);
+    section_end();
+
+    section("vf: angle advances by 2*pi*f*ts and stays wrapped");
+    alg_vf_init(&vf);
+    alg_vf_start(&vf, 50.0f);
+    vf.f_hz = 50.0f;
+    {
+        float th0 = vf.theta;
+        (void)alg_vf_step(&vf, 0.00005f);
+        T(fabsf((vf.theta - th0) - 6.2831853f * 50.0f * 0.00005f) < 1e-6f);
+    }
+    for (i = 0; i < 40000; i++) {          /* 2s = 100 electrical cycles */
+        (void)alg_vf_step(&vf, 0.00005f);
+    }
+    T(vf.theta >= 0.0f && vf.theta < 6.2831854f);
+    section_end();
+
+    section("vf: modulation index follows the V/f curve");
+    alg_vf_init(&vf);
+    vf.f_hz = 10.0f;                       /* 1.5 + 0.26  = 1.76V -> 0.2395 */
+    T(fabsf(alg_vf_mod_index(&vf) - 0.2395f) < 1e-3f);
+    vf.f_hz = 200.0f;                      /* 1.5 + 5.2   = 6.7V  -> 0.9118 */
+    T(fabsf(alg_vf_mod_index(&vf) - 0.9118f) < 1e-3f);
+    vf.f_hz = 500.0f;                      /* clamps at VF_M_MAX */
+    T(fabsf(alg_vf_mod_index(&vf) - VF_M_MAX) < 1e-6f);
+    section_end();
+
+    section("vf: foldback scales the modulation index");
+    alg_vf_init(&vf);
+    vf.f_hz = 10.0f;
+    vf.m_scale = 0.5f;
+    T(fabsf(alg_vf_mod_index(&vf) - 0.1198f) < 1e-3f);
+    vf.m_scale = 1.0f;
+    section_end();
+
+    section("vf: dir negates the angle handed to the SVPWM");
+    alg_vf_init(&vf);
+    alg_vf_start(&vf, 10.0f);
+    vf.f_hz = 10.0f;
+    vf.dir = 0u;
+    {
+        float a0 = alg_vf_step(&vf, 0.00005f);
+        T(a0 >= 0.0f && a0 < 6.2831854f);
+    }
+    vf.dir = 1u;
+    {
+        float a1 = alg_vf_step(&vf, 0.00005f);
+        T(a1 <= 0.0f && a1 > -6.2831854f);
+    }
+    section_end();
+
+    section("vf: stop zeroes the frequency for the next ramp");
+    alg_vf_start(&vf, 80.0f);
+    alg_vf_stop(&vf);
+    T(vf.on == 0u);
+    T(vf.f_hz == 0.0f);
+    T(vf.f_target == 0.0f);
+    section_end();
+}
+
+/* ================================================================== */
 /* Application state machine                                           */
 /* ================================================================== */
 static void test_app(void)
@@ -1124,6 +1286,38 @@ static void test_cmd(void)
     T(tx_contains("ERR usage=led"));
     section_end();
 
+    section("cmd: vf / acc / dir flow");
+    cmd_feed("stop\r\n");
+    tx_clear();
+    cmd_feed("vf 50\r\n");
+    T(tx_contains("ERR start first"));
+    cmd_feed("mode 1\r\n");
+    cmd_feed("start\r\n");
+    tx_clear();
+    cmd_feed("vf 50\r\n");
+    T(tx_contains("OK vf target = 50.00 Hz"));
+    tx_clear();
+    cmd_feed("acc 30\r\n");
+    T(tx_contains("OK acc = 30.00 Hz/s"));
+    tx_clear();
+    cmd_feed("dir 1\r\n");
+    T(tx_contains("OK dir = 1"));
+    tx_clear();
+    cmd_feed("dir 5\r\n");
+    T(tx_contains("ERR dir must be 0 or 1"));
+    tx_clear();
+    cmd_feed("pwm 0.5\r\n");
+    T(tx_contains("ERR vf active"));
+    tx_clear();
+    cmd_feed("vf off\r\n");
+    T(tx_contains("OK vf off"));
+    tx_clear();
+    cmd_feed("pwm 0.5\r\n");
+    T(tx_contains("OK duty = 0.50/0.50/0.50"));
+    cmd_feed("dir 0\r\n");
+    cmd_feed("stop\r\n");
+    section_end();
+
     section("cmd: cur and prof");
     tx_clear();
     cmd_feed("cur\r\n");
@@ -1223,6 +1417,8 @@ int main(void)
     printf("\n[current]\n");         test_current();
     printf("\n[profiler]\n");        test_prof();
     printf("\n[adc]\n");             test_adc();
+    printf("\n[svpwm]\n");           test_svpwm();
+    printf("\n[v/f]\n");             test_vf();
     printf("\n[app state machine]\n"); test_app();
     printf("\n[command parser]\n");  test_cmd();
 

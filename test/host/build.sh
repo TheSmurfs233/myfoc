@@ -20,13 +20,15 @@ if ! command -v gcc >/dev/null 2>&1; then
     exit 1
 fi
 
-INC="-I$HERE/fake -I$ROOT/User/Cfg -I$ROOT/User/Bsp -I$ROOT/User/Mid -I$ROOT/User/App"
+INC="-I$HERE/fake -I$ROOT/User/Cfg -I$ROOT/User/Bsp -I$ROOT/User/Mid -I$ROOT/User/Alg -I$ROOT/User/App"
 SRC="$HERE/test_main.c
      $HERE/fake/hal_stub.c
      $ROOT/User/Mid/mid_ringbuf.c
      $ROOT/User/Mid/mid_log.c
      $ROOT/User/Mid/mid_vofa.c
      $ROOT/User/Mid/mid_current.c
+     $ROOT/User/Alg/alg_svpwm.c
+     $ROOT/User/Alg/alg_vf.c
      $ROOT/User/Bsp/bsp_gpio.c
      $ROOT/User/Bsp/bsp_pwm.c
      $ROOT/User/Bsp/bsp_adc.c

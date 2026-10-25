@@ -491,6 +491,16 @@
               <FilePath>../User/Mid/mid_current.c</FilePath>
             </File>
             <File>
+              <FileName>alg_svpwm.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Alg/alg_svpwm.c</FilePath>
+            </File>
+            <File>
+              <FileName>alg_vf.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Alg/alg_vf.c</FilePath>
+            </File>
+            <File>
               <FileName>app_main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/App/app_main.c</FilePath>
