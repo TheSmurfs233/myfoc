@@ -130,7 +130,7 @@ def main():
     # ---------- 1. help ----------
     out = lk.send("help")
     ls = lines(out)
-    check("help: 24 lines", len(ls) == 24, "got %d" % len(ls))
+    check("help: 25 lines", len(ls) == 25, "got %d" % len(ls))
     check("help: first line", ls and ls[0] == "[log] ---- commands ----", ls[0] if ls else "-")
     check("help: last line", ls and ls[-1] == "[log] ------------------", ls[-1] if ls else "-")
     check("help: rate says 1..500",
@@ -145,6 +145,7 @@ def main():
           any(" dir " in x for x in ls))
     check("help: phase listed", any(" phase " in x for x in ls))
     check("help: trig listed", any(" trig " in x for x in ls))
+    check("help: cordic listed", any(" cordic " in x for x in ls))
     check("help: all lines carry [log] marker", all(x.startswith("[log] ") for x in ls))
 
     # ---------- 2. FireWater text rule: no colon anywhere ----------
