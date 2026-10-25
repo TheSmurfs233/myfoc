@@ -938,6 +938,7 @@ static void test_adc(void)
 /* ================================================================== */
 extern uint8_t fake_ssi_frame[3];
 extern uint8_t fake_ssi_fail;
+extern uint8_t fake_ssi_busy;
 
 static void enc_build_frame(uint16_t d, uint8_t mg)
 {
@@ -1006,14 +1007,25 @@ static void test_enc(void)
     }
     section_end();
 
-    section("enc: a SPI failure is counted");
+    section("enc: late only counts an armed-but-unfinished frame");
     {
-        uint32_t before = mid_enc_info()->io_errs;
+        uint32_t before = mid_enc_info()->late;
 
+        /* Nothing armed (bridge off): this call just arms the next frame, so
+         * it must NOT be counted as late. */
         fake_ssi_fail = 1u;
+        fake_ssi_busy = 0u;
         mid_enc_update();
-        T(mid_enc_info()->io_errs == before + 1u);
+        T(mid_enc_info()->late == before);
+
+        /* Armed but the DMA has not finished: that is a real late frame. */
+        fake_ssi_busy = 1u;
+        mid_enc_update();
+        T(mid_enc_info()->late == before + 1u);
+
         fake_ssi_fail = 0u;
+        fake_ssi_busy = 0u;
+        mid_enc_update();          /* recover so later tests see fresh data */
     }
     section_end();
 

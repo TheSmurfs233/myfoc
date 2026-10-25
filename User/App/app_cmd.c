@@ -492,9 +492,10 @@ static void cmd_exec(char *line)
                        (e->crc_ok != 0u) ? "ok" : "BAD");
             log_printf(" spd = %.2f Hz elec, %.1f rpm mech",
                        (double)e->spd_hz, (double)e->spd_rpm);
-            log_printf(" err = %u/%u crc, %u io, zero %.1f deg, dir %u, src %s",
+            log_printf(" err = %u/%u crc, %u ovr, %u late, zero %.1f deg, dir %u, src %s",
                        (unsigned)e->crc_errs, (unsigned)e->frames,
-                       (unsigned)e->io_errs, (double)e->zero_deg,
+                       (unsigned)e->ovr, (unsigned)e->late,
+                       (double)e->zero_deg,
                        (unsigned)e->dir,
                        (e->src == ENC_SRC_FLASH) ? "flash" : "default");
         }

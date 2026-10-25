@@ -14,6 +14,7 @@
 #include "adc.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
+#include "bsp_ssi.h"
 
 static volatile uint16_t s_raw[3];
 static volatile uint32_t s_frames;
@@ -126,6 +127,11 @@ void HAL_ADCEx_InjectedConvCpltCallback(ADC_HandleTypeDef *hadc)
         }
         s_last_isr_cyc = t_isr;
     }
+
+    /* Start the MT6701 frame here: it takes 2.26us of shifting, which then
+     * overlaps the rest of this ISR and the main loop pickup, so the angle is
+     * ready before the control math needs it (S6). */
+    bsp_ssi_start();
 
     /* Direct register reads: HAL_ADCEx_InjectedGetValue() costs hundreds of ns */
     s_raw[0] = (uint16_t)ADC2->JDR1;

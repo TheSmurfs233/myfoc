@@ -20,7 +20,7 @@ bash test/host/build.sh
   ringbuf: basic push/pop                   ok
   ...
 ============================
-checks: 408   failed: 0
+checks: 409   failed: 0
 RESULT: PASS
 ```
 

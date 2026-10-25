@@ -151,6 +151,8 @@ void mid_enc_init(void)
     s_enc.frames   = 0u;
     s_enc.crc_errs = 0u;
     s_enc.io_errs  = 0u;
+    s_enc.late     = 0u;
+    s_enc.ovr      = 0u;
     s_enc.spd_hz   = 0.0f;
     s_enc.spd_rpm  = 0.0f;
 
@@ -171,11 +173,22 @@ void mid_enc_update(void)
     uint16_t d;
     uint8_t  mg;
     uint8_t  crc_rx;
+    uint8_t  rc;
     float    mech;
     float    elec;
 
-    if (bsp_ssi_read(f) != 0u) {
-        s_enc.io_errs++;
+    rc = bsp_ssi_poll(f);
+    if (rc == 0u) {
+        /* Nothing ready. Two very different cases:
+         *  - a transfer is still armed  -> the DMA missed its slot (late)
+         *  - nothing was armed at all    -> the bridge is off and this call is
+         *    the one that arms the next frame, which is the normal 1 kHz path
+         * Counting both as "late" made the stopped state look broken
+         * (late == frames), so only the first case is counted. */
+        if (bsp_ssi_busy() != 0u) {
+            s_enc.late++;
+        }
+        bsp_ssi_start();
         return;
     }
 
@@ -191,6 +204,16 @@ void mid_enc_update(void)
     s_enc.crc_ok = (mid_enc_crc6(w >> 6) == crc_rx) ? 1u : 0u;
     if (s_enc.crc_ok == 0u) {
         s_enc.crc_errs++;
+    }
+
+    /* A corrupt frame must never reach the control loop: keep the previous
+     * angle (one period old, 0.09 deg at 5 Hz) instead of a wrong one. */
+    if (rc == 2u) {
+        s_enc.ovr++;
+        return;
+    }
+    if (s_enc.crc_ok == 0u) {
+        return;
     }
 
     /* Angle: raw -> mechanical degrees, then remove the zero reference. */

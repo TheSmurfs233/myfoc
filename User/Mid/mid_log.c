@@ -203,7 +203,15 @@ static void log_emit(const char *fmt, va_list ap)
             case 's': {
                 strarg = va_arg(ap, const char *);
                 if (strarg == NULL) { strarg = "(null)"; }
-                slen = (uint16_t)strlen(strarg);
+                /* Bounded on purpose: a corrupted argument used to send
+                 * strlen() across the whole address space and hang the main
+                 * loop (the V/f then froze and the rotor was held by a
+                 * static vector). 128 = the output buffer size, so no valid
+                 * string is ever cut short by this limit. */
+                slen = 0u;
+                while ((slen < 128u) && (strarg[slen] != '\0')) {
+                    slen++;
+                }
                 n = append_field(s_log_buf, n, cap, strarg, slen, width, zero_pad, left);
                 break;
             }

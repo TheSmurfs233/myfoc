@@ -22,7 +22,15 @@ extern "C" {
 
 #include <stdint.h>
 
+/* The format attribute makes GCC (and therefore the host build) check
+ * arguments against the format string. A missing argument shifts every
+ * following value, and for %s that means strlen() on a wild pointer,
+ * which used to hang the main loop and freeze the V/f. */
+#if defined(__GNUC__)
+void log_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+#else
 void log_printf(const char *fmt, ...);
+#endif
 /* Output a NUL-terminated string as-is (no CRLF appended) */
 void log_str(const char *s);
 /* Output CRLF */

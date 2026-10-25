@@ -34,7 +34,9 @@ typedef struct {
     float    zero_deg;     /* stored zero offset                   */
     uint32_t frames;       /* frames read                          */
     uint32_t crc_errs;     /* frames whose CRC did not match       */
-    uint32_t io_errs;      /* SPI transfer failures                */
+    uint32_t io_errs;
+    uint32_t ovr;
+    uint32_t late;      /* SPI transfer failures                */
 } mid_enc_t;
 
 /* Load the zero/direction record from flash and prepare the bus. */
