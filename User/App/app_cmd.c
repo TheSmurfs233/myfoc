@@ -120,6 +120,7 @@ static void print_help(void)
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
     log_printf(" enc [zero|dir|raw]  MT6701 angle, zero capture, direction");
+    log_printf(" align          force-align the rotor and store the electrical zero");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -412,6 +413,20 @@ static void cmd_exec(char *line)
                        (unsigned)c32, (unsigned)s32);
         }
         log_printf("-----------------------------");
+    }
+    /* ---------------- align ----------------- */
+    else if (strcmp(tok[0], "align") == 0) {
+        switch (app_align_start()) {
+        case 0u:
+            log_printf("OK align started, hold theta=0");
+            break;
+        case 2u:
+            log_printf("ERR start first");
+            break;
+        default:
+            log_printf("ERR already aligning");
+            break;
+        }
     }
     /* ---------------- enc ----------------- */
     else if (strcmp(tok[0], "enc") == 0) {

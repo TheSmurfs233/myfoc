@@ -292,6 +292,18 @@ uint8_t mid_enc_zero(void)
     return 0u;
 }
 
+uint8_t mid_enc_zero_set(float deg)
+{
+    while (deg < 0.0f)    { deg += 360.0f; }
+    while (deg >= 360.0f) { deg -= 360.0f; }
+
+    s_enc.zero_deg = deg;
+    s_zero_rad     = deg / ENC_RAD_TO_DEG;
+    enc_save();
+    s_have_prev    = 0u;             /* angles jumped: restart the speed window */
+    return 0u;
+}
+
 uint8_t mid_enc_set_dir(uint8_t dir)
 {
     if (dir > 1u) {

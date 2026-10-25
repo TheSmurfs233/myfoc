@@ -1372,6 +1372,103 @@ static void test_app(void)
     T((fake_flash_regs.ACR & FLASH_ACR_DCEN) == 0u);   /* left off on purpose */
     section_end();
 
+    section("app: align needs the bridge running");
+    {
+        app_stop();
+        T(app_align_start() == 2u);          /* IDLE: rejected */
+        T(app_status()->state != APP_ST_ALIGN);
+    }
+    section_end();
+
+    section("app: align measures the offset by sweeping the field");
+    {
+        uint16_t k;
+        uint32_t t_ms = 0u;
+        const float off_elec = 49.043f;   /* encoder zero offset, elec deg */
+
+        mid_enc_zero_set(0.0f);          /* start from a known zero */
+        app_set_mode(1u);
+        app_start();
+
+        fake_adc2_regs.JDR1 = 2048u;
+        fake_adc2_regs.JDR2 = 2048u;
+        fake_adc2_regs.JDR3 = 2048u;
+        fake_tim1_regs.CNT = 3700u;
+
+        enc_build_frame(0u, 0u);
+        HAL_ADCEx_InjectedConvCpltCallback(&hadc2);
+        app_loop();
+
+        T(app_align_start() == 0u);
+        T(app_status()->state == APP_ST_ALIGN);
+
+        /* Simulate a rotor that follows the field with the encoder zero
+         * sitting off_elec degrees away from the true d-axis. */
+        for (k = 0u; k < 1440u; k++) {
+            float field = 0.0f;
+            float enc_elec;
+            float mech;
+            uint16_t d;
+
+            t_ms += 10u;
+            fake_tick_add(10u);
+
+            if (t_ms < 200u) {
+                field = 0.0f;
+            } else if (t_ms < 7200u) {
+                /* forward: 2 Hz for 7 s = 14 electrical revs */
+                field = 6.2831853f * 2.0f * ((float)(t_ms - 200u) / 1000.0f);
+            } else if (t_ms < 14200u) {
+                float ts = (float)(t_ms - 7200u) / 1000.0f;
+                field = 6.2831853f * (14.0f - (2.0f * ts));
+            } else {
+                field = 0.0f;
+            }
+
+            enc_elec = field + (off_elec * 0.0174532925199433f);
+            mech = enc_elec * (180.0f / 3.14159265358979f) / 7.0f;
+            while (mech >= 360.0f) { mech -= 360.0f; }
+            while (mech < 0.0f)    { mech += 360.0f; }
+            d = (uint16_t)(mech / 360.0f * 16384.0f);
+
+            enc_build_frame(d, 0u);
+            HAL_ADCEx_InjectedConvCpltCallback(&hadc2);
+            app_loop();
+        }
+
+        T(app_align_info()->done == 1u);
+        T(app_align_info()->fail == 0u);
+        T(app_status()->state == APP_ST_IDLE);
+        T(app_align_info()->n > 400u);
+        /* the offset (49.04 deg elec) must become a 7.0 deg mechanical shift */
+        T(fabsf(app_align_info()->err_deg - off_elec) < 2.0f);
+        T(fabsf(mid_enc_info()->zero_deg - 7.006f) < 0.5f);
+    }
+    section_end();
+
+    section("app: align aborts when the encoder never answers");
+    {
+        uint16_t k;
+
+        app_set_mode(1u);
+        app_start();
+        fake_ssi_fail = 1u;
+        enc_build_frame(0u, 0u);
+        HAL_ADCEx_InjectedConvCpltCallback(&hadc2);
+        app_loop();
+
+        T(app_align_start() == 0u);
+        for (k = 0u; k < 60u; k++) {
+            fake_tick_add(10u);
+            HAL_ADCEx_InjectedConvCpltCallback(&hadc2);
+            app_loop();
+        }
+        T(app_align_info()->done == 1u);
+        T(app_align_info()->fail == 3u);
+        T(app_status()->state == APP_ST_IDLE);
+        fake_ssi_fail = 0u;
+    }
+    section_end();
     section("app: mode switch gating");
     (void)app_stop();
     T(app_set_mode(0u) == 0u);

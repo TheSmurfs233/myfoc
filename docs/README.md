@@ -56,7 +56,7 @@ STM32G431KB + MT6701 + 3×INA240A2 的 FOC 无刷电机控制工程文档。
 - 结果看 `MDK-ARM/build.log`，产物在 `MDK-ARM/myfoc/myfoc.axf` / `.hex`
 - **每次换一个日志文件名**（`build2.log`、`b15.log`…）：Keil GUI 开着时同名 log 可能不被覆盖，
   会读到上一次的结果。**以返回码为准，别只看 log 内容。**
-- 基线（2026-10-25，S5 / #54）：`Code=36862 RO=1978 RW=204 ZI=9220`，RAM 占用 9.2KB / 32KB
+- 基线（2026-10-25，S5 / #64）：`Code=38298 RO=2046 RW=236 ZI=9252`，RAM 占用 9.2KB / 32KB
 
 ### 源码编码红线（踩过坑）
 
@@ -77,7 +77,7 @@ bash test/host/build.sh
 ```
 
 用 Vitis_HLS 自带的 msys2 mingw64 gcc，把 `User/` 下的纯逻辑模块配上假 HAL 桩，
-编成 x86 程序跑单元测试。当前 **394 条断言全绿**。
+编成 x86 程序跑单元测试。当前 **408 条断言全绿**。
 
 - 覆盖：环形缓冲、日志格式化、VOFA+ 帧、串口收发驱动、按键消抖、状态机、命令解析
 - 详见 [test/README.md](../test/README.md)

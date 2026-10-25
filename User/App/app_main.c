@@ -53,6 +53,17 @@ static uint16_t      s_i_trip_cnt;
 static uint8_t       s_trig_status;     /* mid_trig_init() result */
 static uint8_t       s_enc_div;         /* ENC_DIV prescaler */
 
+/* ALIGN (S5 zero calibration) */
+static app_align_t   s_align;
+static uint32_t      s_align_t0;        /* tick at start                */
+static float         s_align_err_sum;   /* accum. electrical error (rad)  */
+static uint32_t      s_align_err_n;     /* samples accumulated            */
+static float         s_align_fwd_sum;   /* forward sweep only (rad)       */
+static uint32_t      s_align_fwd_n;
+static float         s_align_rev_sum;   /* reverse sweep only (rad)       */
+static uint32_t      s_align_rev_n;
+static uint32_t      s_align_frames0;   /* encoder frame count at start   */
+
 /* ---- where each control step lands inside the 50us PWM period ---- */
 static app_phase_info_t s_phase;
 
@@ -132,6 +143,7 @@ const char *app_state_name(uint8_t st)
     case APP_ST_INIT:  return "INIT";
     case APP_ST_IDLE:  return "IDLE";
     case APP_ST_RUN:   return "RUN";
+    case APP_ST_ALIGN: return "ALIGN";
     case APP_ST_FAULT: return "FAULT";
     default:           return "?";
     }
@@ -251,6 +263,210 @@ void app_init(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* ALIGN: pull the rotor onto the phase A axis to find the electrical  */
+/* zero. A fixed voltage vector at theta = 0 makes the stator field    */
+/* point along phase A; the permanent magnet turns to follow it.       */
+/* ------------------------------------------------------------------ */
+#define ALIGN_TWO_PI   6.283185307179586f
+
+static void align_finish(uint8_t fail)
+{
+    bsp_pwm_disable();                   /* six outputs low before anything else */
+    bsp_pwm_set_all_duty(PWM_START_DUTY);
+
+    s_align.active = 0u;
+    s_align.done   = 1u;
+    s_align.fail   = fail;
+    s_st.state     = (fail == 2u) ? APP_ST_FAULT : APP_ST_IDLE;
+
+    if (fail == 0u) {
+        log_printf("OK align done, zero %.2f deg, err %.2f (fwd %.2f rev %.2f)",
+                   (double)s_align.zero_deg, (double)s_align.err_deg,
+                   (double)s_align.err_fwd, (double)s_align.err_rev);
+    } else if (fail == 1u) {
+        log_printf("ERR align timeout, rotor did not settle");
+    } else if (fail == 2u) {
+        log_printf("ERR align overcurrent, trip");
+    } else {
+        log_printf("ERR align encoder or flash");
+    }
+}
+
+static void task_align(void)
+{
+    const mid_enc_t        *e = mid_enc_info();
+    const current_sample_t *cs;
+    uint32_t now = HAL_GetTick();
+    uint32_t el  = (uint32_t)(now - s_align_t0);
+    uint32_t t_fwd_end = (uint32_t)ALIGN_RAMP_MS + (uint32_t)ALIGN_SWEEP_MS;
+    uint32_t t_rev_end = t_fwd_end + (uint32_t)ALIGN_SWEEP_MS;
+    float    m;
+    float    theta = 0.0f;
+    float    duty[3];
+    float    imax;
+    float    t;
+    float    revs = ALIGN_SWEEP_HZ * ((float)ALIGN_SWEEP_MS / 1000.0f);
+    uint8_t  accumulate = 0u;
+    uint8_t  i;
+
+    if (s_align.active == 0u) {
+        return;
+    }
+
+    /* Current guard first: the vector is the thing that can hurt. */
+    cs = mid_current_get();
+    imax = fabsf(cs->ia);
+    t = fabsf(cs->ib); if (t > imax) { imax = t; }
+    t = fabsf(cs->ic); if (t > imax) { imax = t; }
+    if (imax > ALIGN_I_MAX_A) {
+        align_finish(2u);
+        return;
+    }
+
+    /* ---- magnitude ramp ---- */
+    if (el < (uint32_t)ALIGN_RAMP_MS) {
+        m = ALIGN_M_START +
+            ((ALIGN_M_MAX - ALIGN_M_START) * (float)el / (float)ALIGN_RAMP_MS);
+        theta = 0.0f;
+    }
+    /* ---- forward sweep: 0 -> revs, accumulate after the transient ---- */
+    else if (el < t_fwd_end) {
+        float ts = (float)(el - (uint32_t)ALIGN_RAMP_MS) / 1000.0f;
+
+        m = ALIGN_M_MAX;
+        theta = ALIGN_TWO_PI * ALIGN_SWEEP_HZ * ts;
+        if ((uint32_t)(el - (uint32_t)ALIGN_RAMP_MS) > (uint32_t)ALIGN_SETTLE_MS) {
+            accumulate = 1u;
+        }
+    }
+    /* ---- reverse sweep: revs -> 0 ---- */
+    else if (el < t_rev_end) {
+        float ts = (float)(el - t_fwd_end) / 1000.0f;
+
+        m = ALIGN_M_MAX;
+        theta = ALIGN_TWO_PI * (revs - (ALIGN_SWEEP_HZ * ts));
+        if (theta < 0.0f) {
+            theta += ALIGN_TWO_PI;
+        }
+        if ((uint32_t)(el - t_fwd_end) > (uint32_t)ALIGN_SETTLE_MS) {
+            accumulate = 1u;
+        }
+    }
+    /* ---- done: apply the averaged offset ---- */
+    else {
+        m = ALIGN_M_MAX;
+        theta = 0.0f;
+    }
+
+    while (theta >= ALIGN_TWO_PI) { theta -= ALIGN_TWO_PI; }
+    while (theta < 0.0f)          { theta += ALIGN_TWO_PI; }
+
+    alg_svpwm(theta, m, duty);
+    for (i = 0u; i < 3u; i++) {
+        if (duty[i] < 0.0f) { duty[i] = 0.0f; }
+        if (duty[i] > 1.0f) { duty[i] = 1.0f; }
+    }
+    bsp_pwm_set_duty(duty[0], duty[1], duty[2]);
+    s_align.m = m;
+
+    /* Abort when no NEW encoder frame arrives (frames stops advancing): the
+     * "valid" flag only says that a frame arrived once, not that it still does. */
+    if (e->frames == s_align_frames0) {
+        if (el > 300u) {
+            align_finish(3u);
+        }
+        return;
+    }
+
+    /* ---- accumulate the tracking error ---- */
+    if (accumulate != 0u) {
+        float enc_rad = e->elec_deg * 0.0174532925199433f;
+        float err = enc_rad - theta;
+
+        while (err >  3.14159265f) { err -= ALIGN_TWO_PI; }
+        while (err < -3.14159265f) { err += ALIGN_TWO_PI; }
+
+        s_align_err_sum += err;
+        s_align_err_n++;
+        if (el < t_fwd_end) {
+            s_align_fwd_sum += err;
+            s_align_fwd_n++;
+        } else {
+            s_align_rev_sum += err;
+            s_align_rev_n++;
+        }
+    }
+
+    if (el >= t_rev_end) {
+        if (s_align_err_n == 0u) {
+            align_finish(1u);
+            return;
+        }
+
+        /* mean electrical error -> mechanical correction */
+        {
+            float err_elec_deg = (s_align_err_sum / (float)s_align_err_n)
+                                 * 57.29577951308232f;
+            float corr = err_elec_deg / (float)ENC_POLE_PAIRS;
+            float nz   = mid_enc_info()->zero_deg + corr;
+
+            s_align.err_deg = err_elec_deg;
+            s_align.n       = s_align_err_n;
+            s_align.err_fwd = (s_align_fwd_n != 0u)
+                              ? (s_align_fwd_sum / (float)s_align_fwd_n)
+                                * 57.29577951308232f : 0.0f;
+            s_align.err_rev = (s_align_rev_n != 0u)
+                              ? (s_align_rev_sum / (float)s_align_rev_n)
+                                * 57.29577951308232f : 0.0f;
+
+            (void)mid_enc_zero_set(nz);
+            s_align.zero_deg = mid_enc_info()->zero_deg;
+            align_finish(0u);
+        }
+        return;
+    }
+
+    if (el > ALIGN_TIMEOUT_MS) {
+        align_finish(1u);
+    }
+}
+uint8_t app_align_start(void)
+{
+    if (s_st.state != APP_ST_RUN) {
+        return 2u;                       /* start the bridge first */
+    }
+    if (s_align.active != 0u) {
+        return 3u;
+    }
+
+    /* The vector itself is written by task_align every frame (it ramps), so
+     * nothing to do here beyond arming the state. */
+
+    s_align.active     = 1u;
+    s_align.done       = 0u;
+    s_align.fail       = 0u;
+    s_align.zero_deg   = mid_enc_info()->zero_deg;
+    s_align_t0         = HAL_GetTick();
+    s_align_err_sum    = 0.0f;
+    s_align_err_n      = 0u;
+    s_align_fwd_sum    = 0.0f;
+    s_align_fwd_n      = 0u;
+    s_align_rev_sum    = 0.0f;
+    s_align_rev_n      = 0u;
+    s_align_frames0    = mid_enc_info()->frames;
+    s_align.err_deg    = 0.0f;
+    s_align.n          = 0u;
+
+    s_st.state = APP_ST_ALIGN;
+    return 0u;
+}
+
+const app_align_t *app_align_info(void)
+{
+    return &s_align;
+}
+
+/* ------------------------------------------------------------------ */
 /* State control                                                       */
 /* ------------------------------------------------------------------ */
 uint8_t app_start(void)
@@ -290,6 +506,7 @@ uint8_t app_stop(void)
 
     bsp_pwm_disable();                   /* MOE=0 first: six outputs low */
     bsp_pwm_set_all_duty(PWM_START_DUTY);
+    s_align.active = 0u;                 /* abort any alignment */
     s_st.state = APP_ST_IDLE;            /* also clears FAULT */
     return 0u;
 }
@@ -297,7 +514,9 @@ uint8_t app_stop(void)
 uint8_t app_set_mode(uint8_t m)
 {
     if (m > (uint8_t)CTRL_FOC) { return 1u; }
-    if (s_st.state == APP_ST_RUN) { return 2u; }   /* not while running */
+    if ((s_st.state == APP_ST_RUN) || (s_st.state == APP_ST_ALIGN)) {
+        return 2u;                       /* not while running or aligning */
+    }
     s_st.mode  = m;
     s_st.state = APP_ST_IDLE;
     return 0u;
@@ -565,6 +784,11 @@ static void task_adc(void)
             mid_enc_update();
             bsp_prof_add(PROF_ENC, t_enc);
         }
+    }
+
+    /* S5: supervised forced alignment (fixed vector already written) */
+    if (s_st.state == APP_ST_ALIGN) {
+        task_align();
     }
 }
 

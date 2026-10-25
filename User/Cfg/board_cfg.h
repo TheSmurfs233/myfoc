@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             54u
+#define FW_BUILD_ID             64u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -248,6 +248,39 @@ extern "C" {
 #define ENC_FLASH_ADDR          0x0801F000u
 #define ENC_FLASH_MAGIC         0x31434E45u     /* ENC1 little endian */
 #define ENC_FLASH_VERSION       1u
+
+
+/* ---- ALIGN: forced alignment for the electrical zero (S5) ------------- */
+/* A fixed voltage vector at theta = 0 pulls the rotor d-axis onto the phase A
+ * axis. m = 0.20 gives ~1.5V line-to-line, i.e. ~0.33A through 4.6 ohm. */
+/* Alignment strategy: bidirectional sweep averaging.
+ *
+ * A static d-axis vector (the classic method) does not work on this motor:
+ * the magnetic torque falls as sin(dtheta) near the equilibrium, and the
+ * bearing stiction plus cogging stop the rotor a few degrees short (measured:
+ * 0.5A moved it 0.83 deg, 1.0A only 0.27 deg). Spinning the field drags the
+ * rotor along, but when the field stops the rotor keeps its lag angle, so the
+ * final position varied by +/-9 deg mechanical between runs.
+ *
+ * So instead of trying to "catch" the rotor, MEASURE the offset:
+ *   - sweep the field forward N revs and back N revs at ALIGN_SWEEP_HZ
+ *   - every frame accumulate err = encoder_elec - field_elec
+ *   - the friction lag has opposite signs in the two directions and cancels,
+ *     the encoder zero offset stays, the cogging ripple averages out
+ *   - finally shift the stored zero by err_mean / pole_pairs
+ * This does not need the torque to beat the stiction, only the rotor to
+ * roughly follow the field, which it does. */
+#define ALIGN_M_START           0.15f
+#define ALIGN_M_MAX             0.45f   /* ~1.17A in phase A (ADC range 1.32A) */
+#define ALIGN_RAMP_MS           200u    /* spin up the magnitude first */
+#define ALIGN_SWEEP_HZ          2.0f    /* electrical Hz during the sweeps */
+/* 7 electrical revs = exactly ONE mechanical rev (7 pole pairs): that makes
+ * the encoder eccentricity (period = 1 mech rev) average to zero, which a
+ * non-integer number of revs cannot do. */
+#define ALIGN_SWEEP_MS          7000u   /* 2 Hz * 7 s = 14 elec revs = 2 mech revs */
+#define ALIGN_SETTLE_MS         1000u   /* let the rotor catch up before averaging */
+#define ALIGN_I_MAX_A           1.28f   /* abort above this (ADC range 1.32 A) */
+#define ALIGN_TIMEOUT_MS        18000u  /* two sweeps plus margin */
 
 /* Read the encoder every N control frames (1 = 20kHz). */
 #define ENC_DIV                 1u

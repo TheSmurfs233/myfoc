@@ -26,8 +26,28 @@ typedef enum {
     APP_ST_INIT = 0,
     APP_ST_IDLE,
     APP_ST_RUN,
+    APP_ST_ALIGN,       /* forced alignment: fixed vector, rotor pulled to theta=0 */
     APP_ST_FAULT
 } app_state_t;
+
+/* ALIGN (electrical zero calibration) outcome */
+typedef struct {
+    uint8_t  active;        /* running right now                      */
+    uint8_t  done;          /* finished at least once                  */
+    uint8_t  fail;          /* 0 = ok, 1 = timeout, 2 = overcurrent,
+                             * 3 = encoder or flash problem            */
+    float    zero_deg;      /* captured zero when fail == 0            */
+    float    m;             /* current modulation index during align   */
+    float    err_deg;       /* measured electrical offset (deg)        */
+    uint32_t n;             /* error samples accumulated               */
+    float    err_fwd;       /* mean error, forward sweep (deg elec)    */
+    float    err_rev;       /* mean error, reverse sweep (deg elec)    */
+} app_align_t;
+
+/* Start the alignment; requires the bridge running (start first).
+ * Returns 0 on success, 2 = not running, 3 = already aligning. */
+uint8_t app_align_start(void);
+const app_align_t *app_align_info(void);
 
 /* Control mode */
 typedef enum {

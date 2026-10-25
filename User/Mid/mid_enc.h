@@ -48,6 +48,10 @@ const mid_enc_t *mid_enc_info(void);
 /* Current mechanical angle becomes electrical zero. Persists to flash. */
 uint8_t mid_enc_zero(void);
 
+/* Set the electrical zero to an explicit mechanical angle (degrees).
+ * Used by the bidirectional-sweep alignment. Persists to flash. */
+uint8_t mid_enc_zero_set(float deg);
+
 /* 0 = CCW positive (default), 1 = reversed. Persists to flash. */
 uint8_t mid_enc_set_dir(uint8_t dir);
 
