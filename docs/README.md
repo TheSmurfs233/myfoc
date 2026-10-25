@@ -77,7 +77,7 @@ bash test/host/build.sh
 ```
 
 用 Vitis_HLS 自带的 msys2 mingw64 gcc，把 `User/` 下的纯逻辑模块配上假 HAL 桩，
-编成 x86 程序跑单元测试。当前 **409 条断言全绿**。
+编成 x86 程序跑单元测试。当前 **432 条断言全绿**。
 
 - 覆盖：环形缓冲、日志格式化、VOFA+ 帧、串口收发驱动、按键消抖、状态机、命令解析
 - 详见 [test/README.md](../test/README.md)

@@ -34,6 +34,9 @@ extern "C" {
  * three phases is the zero vector. */
 void alg_svpwm(float theta, float m, float duty[3]);
 
+/* Stationary-frame form: v_alpha/v_beta carry the modulation index directly. */
+void alg_svpwm_ab(float v_alpha, float v_beta, float duty[3]);
+
 #ifdef __cplusplus
 }
 #endif

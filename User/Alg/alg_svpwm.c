@@ -52,3 +52,35 @@ void alg_svpwm(float theta, float m, float duty[3])
         duty[i] -= off;
     }
 }
+
+/* Same as alg_svpwm() but takes the voltage vector in the stationary frame.
+ * With v_alpha = m*cos(theta) and v_beta = m*sin(theta) this produces exactly
+ * the same duties as alg_svpwm(theta, m); the host test checks that equality
+ * over a full electrical revolution. This form saves the atan2 that the FOC
+ * path would otherwise need after the inverse Park transform. */
+void alg_svpwm_ab(float v_alpha, float v_beta, float duty[3])
+{
+    float hi;
+    float lo;
+    float off;
+    uint8_t i;
+
+    if (duty == 0) {
+        return;
+    }
+
+    duty[0] = 0.5f + (0.5f * v_alpha);
+    duty[1] = 0.5f + (0.5f * ((ALG_COS120 * v_alpha) + (ALG_SIN120 * v_beta)));
+    duty[2] = 0.5f + (0.5f * ((ALG_COS120 * v_alpha) - (ALG_SIN120 * v_beta)));
+
+    hi = duty[0];
+    lo = duty[0];
+    for (i = 1u; i < 3u; i++) {
+        if (duty[i] > hi) { hi = duty[i]; }
+        if (duty[i] < lo) { lo = duty[i]; }
+    }
+    off = 0.5f * (hi + lo) - 0.5f;
+    for (i = 0u; i < 3u; i++) {
+        duty[i] -= off;
+    }
+}

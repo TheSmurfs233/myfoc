@@ -34,6 +34,8 @@
 #include "bsp_prof.h"
 #include "alg_svpwm.h"
 #include "alg_vf.h"
+#include "alg_pi.h"
+#include "alg_foc.h"
 #include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
@@ -1772,6 +1774,131 @@ static void test_cmd(void)
     cmd_feed("trig\r\n");
     T(tx_contains("trig = "));
     T(tx_contains("cycles/call"));
+    section_end();
+
+    section("pi: proportional, integral and anti-windup");
+    {
+        alg_pi_t pi;
+        float out;
+        int16_t k;
+
+        alg_pi_init(&pi, 2.0f, 100.0f, -5.0f, 5.0f);
+        out = alg_pi_step(&pi, 0.1f, 0.00005f);
+        T(fabsf(out - 0.2f) < 0.02f);
+
+        alg_pi_reset(&pi);
+        for (k = 0; k < 5000; k++) {
+            out = alg_pi_step(&pi, 1.0f, 0.00005f);
+        }
+        T(out <= 5.0f);
+        T(out > 4.9f);
+        T(pi.integ <= 5.001f);
+
+        for (k = 0; k < 200; k++) {
+            out = alg_pi_step(&pi, -1.0f, 0.00005f);
+        }
+        T(out < 5.0f);
+    }
+    section_end();
+
+    section("foc: clarke and park match the textbook formulas");
+    {
+        float a;
+        float b;
+        float d;
+        float q;
+
+        alg_clarke(1.0f, -0.5f, &a, &b);
+        T(fabsf(a - 1.0f) < 1e-5f);
+        T(fabsf(b) < 1e-5f);
+
+        alg_park(a, b, 0.0f, 1.0f, &d, &q);
+        T(fabsf(d - 1.0f) < 1e-5f);
+        T(fabsf(q) < 1e-5f);
+
+        alg_park(1.0f, 0.0f, 1.0f, 0.0f, &d, &q);
+        T(fabsf(d) < 1e-5f);
+        T(fabsf(q + 1.0f) < 1e-5f);
+
+        {
+            float c = 0.6f;
+            float sn = 0.8f;
+            float a2;
+            float b2;
+
+            alg_park(0.3f, -0.7f, sn, c, &d, &q);
+            alg_inv_park(d, q, sn, c, &a2, &b2);
+            T(fabsf(a2 - 0.3f) < 1e-5f);
+            T(fabsf(b2 + 0.7f) < 1e-5f);
+        }
+    }
+    section_end();
+
+    section("foc: svpwm alpha-beta form equals the polar form");
+    {
+        uint16_t k;
+        float d1[3];
+        float d2[3];
+        float worst = 0.0f;
+
+        for (k = 0u; k < 360u; k++) {
+            float th = (float)k * 0.0174532925199433f;
+            float c;
+            float sn;
+            uint8_t i;
+
+            mid_trig_cos_sin(th, &c, &sn);
+            alg_svpwm(th, 0.7f, d1);
+            alg_svpwm_ab(0.7f * c, 0.7f * sn, d2);
+
+            for (i = 0u; i < 3u; i++) {
+                float e = fabsf(d1[i] - d2[i]);
+                if (e > worst) { worst = e; }
+            }
+        }
+        T(worst < 1e-4f);
+    }
+    section_end();
+
+    section("foc: loop saturates inside the voltage circle");
+    {
+        alg_foc_t f;
+        float duty[3];
+        float mag;
+        uint16_t k;
+
+        alg_foc_init(&f, 12.0f, 0.95f, 1.57f, 7227.0f, 5.7f);
+
+        for (k = 0u; k < 20000u; k++) {
+            (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f,
+                               0.5f, 0.0f, 0.00005f, duty);
+        }
+
+        mag = sqrtf((f.vd * f.vd) + (f.vq * f.vq));
+        T(mag <= 5.71f);
+        T(mag > 5.0f);                   /* it did saturate */
+        /* the reported modulation index must also respect the limit */
+        T(f.m <= 0.951f);
+        T(duty[0] >= 0.0f && duty[0] <= 1.0f);
+        T(duty[1] >= 0.0f && duty[1] <= 1.0f);
+        T(duty[2] >= 0.0f && duty[2] <= 1.0f);
+        T(fabsf(f.vq) < 0.5f);           /* iq ref was 0 */
+    }
+    section_end();
+
+    section("foc: circle limit keeps the vector angle");
+    {
+        alg_foc_t f;
+        float duty[3];
+        float mag;
+
+        alg_foc_init(&f, 12.0f, 0.95f, 50.0f, 0.0f, 5.7f);
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+                           0.00005f, duty);
+        mag = sqrtf((f.vd * f.vd) + (f.vq * f.vq));
+        T(mag <= 5.71f);
+        T(fabsf(f.vd - f.vq) < 0.01f);
+    }
     section_end();
 
     section("cmd: unknown command");

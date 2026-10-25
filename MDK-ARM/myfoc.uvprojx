@@ -526,6 +526,16 @@
               <FilePath>../User/Alg/alg_vf.c</FilePath>
             </File>
             <File>
+              <FileName>alg_pi.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Alg/alg_pi.c</FilePath>
+            </File>
+            <File>
+              <FileName>alg_foc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Alg/alg_foc.c</FilePath>
+            </File>
+            <File>
               <FileName>app_main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/App/app_main.c</FilePath>
