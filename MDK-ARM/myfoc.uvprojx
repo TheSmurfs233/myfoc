@@ -471,6 +471,11 @@
               <FilePath>../User/Bsp/bsp_cordic.c</FilePath>
             </File>
             <File>
+              <FileName>bsp_ssi.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Bsp/bsp_ssi.c</FilePath>
+            </File>
+            <File>
               <FileName>bsp_adc.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Bsp/bsp_adc.c</FilePath>
@@ -504,6 +509,11 @@
               <FileName>mid_trig.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/Mid/mid_trig.c</FilePath>
+            </File>
+            <File>
+              <FileName>mid_enc.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Mid/mid_enc.c</FilePath>
             </File>
             <File>
               <FileName>alg_svpwm.c</FileName>

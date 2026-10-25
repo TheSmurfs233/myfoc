@@ -34,6 +34,7 @@
 #include "bsp_prof.h"
 #include "alg_svpwm.h"
 #include "alg_vf.h"
+#include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
 #include "app_main.h"
@@ -933,6 +934,158 @@ static void test_adc(void)
 }
 
 /* ================================================================== */
+/* Encoder (Mid + Bsp fake)                                            */
+/* ================================================================== */
+extern uint8_t fake_ssi_frame[3];
+extern uint8_t fake_ssi_fail;
+
+static void enc_build_frame(uint16_t d, uint8_t mg)
+{
+    uint32_t bits = (((uint32_t)d & 0x3FFFu) << 4) | ((uint32_t)mg & 0x0Fu);
+    uint8_t  crc  = mid_enc_crc6(bits);
+    uint32_t w    = (bits << 6) | (uint32_t)(crc & 0x3Fu);
+
+    fake_ssi_frame[0] = (uint8_t)((w >> 16) & 0xFFu);
+    fake_ssi_frame[1] = (uint8_t)((w >> 8) & 0xFFu);
+    fake_ssi_frame[2] = (uint8_t)(w & 0xFFu);
+}
+
+static void test_enc(void)
+{
+    const mid_enc_t *e;
+
+    fake_ssi_fail = 0u;
+    mid_enc_init();
+
+    section("enc: no frame yet");
+    e = mid_enc_info();
+    T(e->valid == 0u);
+    T(e->frames == 0u);
+    section_end();
+
+    section("enc: raw zero maps to 0 deg, CRC accepted");
+    enc_build_frame(0u, 0u);
+    mid_enc_update();
+    e = mid_enc_info();
+    T(e->valid == 1u);
+    T(e->crc_ok == 1u);
+    T(e->raw == 0u);
+    T(fabsf(e->mech_deg) < 0.01f);
+    T(fabsf(e->elec_deg) < 0.01f);
+    section_end();
+
+    section("enc: quarter and half turn");
+    enc_build_frame(4096u, 0u);                 /* 90 deg mechanical */
+    mid_enc_update();
+    e = mid_enc_info();
+    T(fabsf(e->mech_deg - 90.0f) < 0.02f);
+    T(fabsf(e->elec_deg - 270.0f) < 0.05f);     /* 90*7 = 630 -> 270 */
+
+    enc_build_frame(8192u, 0u);                 /* 180 deg */
+    mid_enc_update();
+    T(fabsf(mid_enc_info()->mech_deg - 180.0f) < 0.02f);
+    section_end();
+
+    section("enc: magnetic status is decoded");
+    enc_build_frame(100u, 2u);                  /* field too weak */
+    mid_enc_update();
+    T(mid_enc_info()->mg == 2u);
+    section_end();
+
+    section("enc: a corrupted CRC is counted but the angle is kept");
+    {
+        uint32_t before = mid_enc_info()->crc_errs;
+
+        enc_build_frame(1000u, 0u);
+        fake_ssi_frame[2] ^= 0x01u;             /* flip a CRC bit */
+        mid_enc_update();
+        e = mid_enc_info();
+        T(e->crc_ok == 0u);
+        T(e->crc_errs == before + 1u);
+        T(e->raw == 1000u);
+    }
+    section_end();
+
+    section("enc: a SPI failure is counted");
+    {
+        uint32_t before = mid_enc_info()->io_errs;
+
+        fake_ssi_fail = 1u;
+        mid_enc_update();
+        T(mid_enc_info()->io_errs == before + 1u);
+        fake_ssi_fail = 0u;
+    }
+    section_end();
+
+    section("enc: zero capture makes the current position 0 deg");
+    enc_build_frame(2048u, 0u);                 /* 45 deg */
+    mid_enc_update();
+    T(mid_enc_zero() == 0u);
+    T(fabsf(mid_enc_info()->zero_deg - 45.0f) < 0.05f);
+    mid_enc_update();
+    T(fabsf(mid_enc_info()->mech_deg) < 0.02f);
+    section_end();
+
+    section("enc: direction reverses the electrical angle");
+    enc_build_frame(2048u + 468u, 0u);          /* zero + ~10.3 deg */
+    mid_enc_update();
+    {
+        float fwd = mid_enc_info()->elec_deg;
+
+        T(mid_enc_set_dir(1u) == 0u);
+        mid_enc_update();
+        T(fabsf(mid_enc_info()->elec_deg - (360.0f - fwd)) < 0.05f);
+        T(mid_enc_set_dir(0u) == 0u);
+    }
+    section_end();
+
+    section("enc: speed estimate over a 10ms window");
+    {
+        uint8_t k;
+        extern DWT_TypeDef fake_dwt;
+
+        fake_dwt.CYCCNT = 1000000u;
+        enc_build_frame(0u, 0u);
+        mid_enc_update();                 /* first sample: no delta yet */
+
+        /* 3.6 deg mechanical per 1ms = 10 rev/s = 70 Hz electrical */
+        for (k = 1u; k <= 12u; k++) {
+            uint16_t d = (uint16_t)((uint32_t)k * 164u);   /* 3.6 deg = 163.84 LSB */
+
+            fake_dwt.CYCCNT += (SYS_CORE_CLK_HZ / 1000u);
+            enc_build_frame(d, 0u);
+            mid_enc_update();
+        }
+        T(fabsf(mid_enc_info()->spd_hz - 70.0f) < 3.0f);
+        T(fabsf(mid_enc_info()->spd_rpm - 600.0f) < 30.0f);
+    }
+    section_end();
+
+    section("enc: speed drops to zero when the rotor stops");
+    {
+        uint8_t k;
+        extern DWT_TypeDef fake_dwt;
+
+        /* 25 frames so a second, fully static 10ms window completes even when
+         * the first one still carried deltas from the previous test */
+        for (k = 0u; k < 25u; k++) {
+            fake_dwt.CYCCNT += (SYS_CORE_CLK_HZ / 1000u);
+            enc_build_frame(1968u, 0u);
+            mid_enc_update();
+        }
+        T(fabsf(mid_enc_info()->spd_hz) < 1.0f);
+    }
+    section_end();
+    section("enc: zero and direction survive a re-init (flash)");
+    mid_enc_init();
+    e = mid_enc_info();
+    T(e->src == ENC_SRC_FLASH);
+    T(fabsf(e->zero_deg - 45.0f) < 0.05f);
+    T(e->dir == 0u);
+    section_end();
+}
+
+/* ================================================================== */
 /* SVPWM (Alg)                                                         */
 /* ================================================================== */
 /* ---- sin/cos back end (Mid) ---- */
@@ -1455,6 +1608,14 @@ static void test_cmd(void)
     T(tx_contains("OK prof reset"));
     section_end();
 
+    section("cmd: vf 0 behaves like vf off");
+    cmd_feed("mode 1\r\nstart\r\n");
+    tx_clear();
+    cmd_feed("vf 0\r\n");
+    T(tx_contains("OK vf 0 = off"));
+    T(app_vf_info()->on == 0u);
+    T(mid_current_get()->ready == 1u);
+    section_end();
     section("cmd: phase report");
     tx_clear();
     cmd_feed("phase\r\n");
@@ -1560,6 +1721,7 @@ int main(void)
     printf("\n[adc]\n");             test_adc();
     printf("\n[svpwm]\n");           test_svpwm();
     printf("\n[trig]\n");            test_trig();
+    printf("\n[enc]\n");             test_enc();
     printf("\n[v/f]\n");             test_vf();
     printf("\n[app state machine]\n"); test_app();
     printf("\n[command parser]\n");  test_cmd();

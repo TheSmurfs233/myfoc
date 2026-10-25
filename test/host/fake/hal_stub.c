@@ -25,7 +25,10 @@ UART_HandleTypeDef  huart1      = { &fake_usart1, 0u };
 
 /* TIM1 register model. BDTR defaults to DTG=4 (as programmed in tim.c) so the
  * boot-time dead-time check in app_init() stays quiet. */
-TIM_TypeDef         fake_tim1_regs = { 0u, 0u, 0u, 0u, 0u, 0u, 0u, 4u, 0u };
+TIM_TypeDef         fake_tim1_regs = { .CR1 = 0u, .SR = 0u, .CNT = 0u, .CCER = 0u,
+                                          .CCMR1 = 0u, .CCMR2 = 0u,
+                                          .CCR1 = 0u, .CCR2 = 0u, .CCR3 = 0u, .CCR4 = 4u,
+                                          .BDTR = 0u, .EGR = 0u };
 
 /* ADC2 injected-group model + DWT cycle counter model */
 ADC_TypeDef         fake_adc2_regs = { 2048u, 2048u, 2048u, 0u, 0u, 0u, 0u };
@@ -65,6 +68,7 @@ void     HAL_Delay(uint32_t ms)     { s_tick += ms; }   /* never blocks on the h
 /* ---------------- FLASH: fake ACR + one 2KB page at CAL_FLASH_ADDR -------- */
 FLASH_TypeDef fake_flash_regs;
 uint8_t fake_flash_page[0x800u];
+uint8_t fake_flash_page_enc[0x800u];
 static int s_flash_ready;
 
 static void fake_flash_init(void)
@@ -83,9 +87,19 @@ void fake_flash_reset(void)
 
 void fake_flash_read(uint32_t addr, void *dst, uint32_t len)
 {
-    uint32_t off = addr - CAL_FLASH_ADDR;
+    uint32_t off;
+
     fake_flash_init();
-    if (off + len > sizeof(fake_flash_page)) { memset(dst, 0xFF, len); return; }
+
+    if ((addr >= ENC_FLASH_ADDR) && (addr < (ENC_FLASH_ADDR + 0x800u))) {
+        off = addr - ENC_FLASH_ADDR;
+        if ((off + len) > sizeof(fake_flash_page_enc)) { memset(dst, 0xFF, len); return; }
+        memcpy(dst, &fake_flash_page_enc[off], len);
+        return;
+    }
+
+    off = addr - CAL_FLASH_ADDR;
+    if ((off + len) > sizeof(fake_flash_page)) { memset(dst, 0xFF, len); return; }
     memcpy(dst, &fake_flash_page[off], len);
 }
 void     fake_tick_reset(void)      { s_tick = 0u; }

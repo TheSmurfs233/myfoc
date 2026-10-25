@@ -28,6 +28,7 @@
 #include "bsp_sys.h"
 #include "bsp_uart.h"
 #include "mid_current.h"
+#include "mid_enc.h"
 #include "mid_log.h"
 #include "mid_trig.h"
 #include <math.h>
@@ -40,6 +41,7 @@ static app_status_t s_st;
 static uint32_t     s_loop_cnt;
 static uint32_t     s_t_1ms;
 static uint32_t     s_t_wave;
+static uint32_t     s_t_enc;
 static uint16_t     s_wave_period_ms; /* upload period in ms */
 static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 
@@ -49,6 +51,7 @@ static app_vf_info_t s_vf_info;
 static uint16_t      s_i_fold_cnt;
 static uint16_t      s_i_trip_cnt;
 static uint8_t       s_trig_status;     /* mid_trig_init() result */
+static uint8_t       s_enc_div;         /* ENC_DIV prescaler */
 
 /* ---- where each control step lands inside the 50us PWM period ---- */
 static app_phase_info_t s_phase;
@@ -164,6 +167,7 @@ void app_init(void)
     s_loop_cnt       = 0u;
     s_t_1ms          = HAL_GetTick();
     s_t_wave         = s_t_1ms;
+    s_t_enc          = s_t_1ms;
     s_wave_period_ms = (uint16_t)(1000u / s_st.wave_rate_hz);
     s_adc_seen       = 0u;
 
@@ -182,6 +186,7 @@ void app_init(void)
     bsp_sys_init();          /* ART: flash prefetch + I-cache, must be first */
     bsp_prof_init();         /* DWT cycle counter, must be first */
     s_trig_status = mid_trig_init();   /* LUT: always OK; CORDIC: self-test */
+    mid_enc_init();                    /* MT6701: zero/dir from flash */
     bsp_gpio_init();
     bsp_uart_init();
     bsp_pwm_init();          /* counter runs, six outputs stay off (MOE=0) */
@@ -205,6 +210,10 @@ void app_init(void)
                (unsigned)PWM_FREQ_HZ_CALC, (unsigned)PWM_ARR, (unsigned)PWM_DTG_REG);
     log_printf(" trig = %s%s", mid_trig_name(),
                (s_trig_status != 0u) ? " (SELF TEST FAILED)" : "");
+    log_printf(" enc  = %s, off %.1f deg, dir %u",
+               (mid_enc_info()->src == ENC_SRC_FLASH) ? "flash" : "default",
+               (double)mid_enc_info()->zero_deg,
+               (unsigned)mid_enc_info()->dir);
     log_printf(" cur  = Rs=%u mOhm x%u, %u uA/LSB, +-%u mA",
                (unsigned)(RSHUNT_OHM * 1000.0f + 0.5f), (unsigned)INA240_GAIN,
                (unsigned)(CUR_A_PER_LSB * 1000000.0f + 0.5f),
@@ -304,6 +313,9 @@ uint8_t app_vf_set(float hz)
     }
     if (mid_current_get()->ready == 0u) {
         return 3u;                       /* zero drift still being measured */
+    }
+    if (hz <= 0.0f) {
+        return app_vf_off();             /* "0 Hz" means stop modulating */
     }
     alg_vf_start(&s_vf, hz);
     s_i_fold_cnt = 0u;
@@ -468,6 +480,25 @@ static void key_action(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* Encoder poll while stopped (1kHz)                                   */
+/*                                                                     */
+/* The ADC trigger is gated by MOE, so no frames arrive while the      */
+/* bridge is off and the 20kHz path in task_adc never runs. Poll the   */
+/* encoder here instead so "enc" and "enc zero" work at standstill.    */
+/* ------------------------------------------------------------------ */
+static void task_enc_slow(uint32_t now)
+{
+    if (s_st.state == APP_ST_RUN) {
+        return;                      /* task_adc already reads at 20kHz */
+    }
+    if ((uint32_t)(now - s_t_enc) < ENC_POLL_MS) {
+        return;
+    }
+    s_t_enc = now;
+    mid_enc_update();
+}
+
+/* ------------------------------------------------------------------ */
 /* 1ms task: uptime and loop rate statistics                           */
 /* ------------------------------------------------------------------ */
 static void task_1ms(uint32_t now)
@@ -512,6 +543,19 @@ static void task_adc(void)
     /* S4: the V/f ramp runs once per ADC frame, right after the currents are
      * fresh. S6 will fold the current loop into the same place. */
     task_vf(t0);
+
+    /* S5: the encoder is read AFTER the control chain, so its 3us SPI transfer
+     * can never delay the duty update. The angle is therefore one frame old
+     * for the next control step (S6 will move it to DMA). */
+    if (ENC_DIV <= 1u) {
+        mid_enc_update();
+    } else {
+        s_enc_div++;
+        if (s_enc_div >= ENC_DIV) {
+            s_enc_div = 0u;
+            mid_enc_update();
+        }
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -519,7 +563,7 @@ static void task_adc(void)
 /* ------------------------------------------------------------------ */
 static void task_wave(uint32_t now)
 {
-    float    ch[7];
+    float    ch[10];
     float    a, b, c;
     uint32_t t0;
     const current_sample_t *cs;
@@ -542,8 +586,13 @@ static void task_wave(uint32_t now)
     ch[4] = cs->ia;                    /* phase currents, A    */
     ch[5] = cs->ib;
     ch[6] = cs->ic;
+    /* S5: encoder angles and speed so VOFA+ can compare them with the
+     * commanded V/f frequency (same unit: electrical Hz). */
+    ch[7] = mid_enc_info()->mech_deg;
+    ch[8] = mid_enc_info()->elec_deg;
+    ch[9] = mid_enc_info()->spd_hz;
 
-    if (vofa_send(ch, 7u) != 0u) {
+    if (vofa_send(ch, 10u) != 0u) {
         s_st.wave_frames++;
     } else {
         s_st.wave_drop++;
@@ -575,6 +624,7 @@ void app_loop(void)
     bsp_prof_add(PROF_TXPUMP, t);
 
     task_adc();
+    task_enc_slow(now);
     task_1ms(now);
     task_wave(now);
 

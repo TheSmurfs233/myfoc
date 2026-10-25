@@ -16,8 +16,10 @@
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
+#include "bsp_ssi.h"
 #include "bsp_uart.h"
 #include "mid_current.h"
+#include "mid_enc.h"
 #include "mid_log.h"
 #include "mid_trig.h"
 #include "mid_vofa.h"
@@ -111,12 +113,13 @@ static void print_help(void)
     log_printf(" vf <hz>        open-loop V/f target, electrical Hz (needs start)");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
-    log_printf(" dir <0|1>      phase sequence: 1 reverses the rotation");
+    log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
     log_printf(" cal [erase]    zero-drift calibration (needs start), erase = wipe");
     log_printf(" prof [reset|on|off]  per-stage timing profile (DWT)");
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
+    log_printf(" enc [zero|dir|raw]  MT6701 angle, zero capture, direction");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -287,6 +290,12 @@ static void cmd_exec(char *line)
 
             if (!parse_duty(tok[1], &hz)) {
                 log_printf("ERR usage=vf <hz> | vf off");
+            } else if (hz <= 0.0f) {
+                /* "vf 0" is the same as "vf off": a V/f drive at 0 Hz would
+                 * only apply the low-speed boost as a DC vector, which
+                 * heats the motor and holds the shaft without rotating. */
+                (void)app_vf_off();
+                log_printf("OK vf 0 = off, duty 0.50");
             } else {
                 switch (app_vf_set(hz)) {
                 case 0u:
@@ -403,6 +412,57 @@ static void cmd_exec(char *line)
                        (unsigned)c32, (unsigned)s32);
         }
         log_printf("-----------------------------");
+    }
+    /* ---------------- enc ----------------- */
+    else if (strcmp(tok[0], "enc") == 0) {
+        const mid_enc_t *e = mid_enc_info();
+
+        if ((n >= 2u) && (strcmp(tok[1], "zero") == 0)) {
+            if (mid_enc_zero() == 0u) {
+                log_printf("OK enc zero, off %.2f deg (saved)",
+                           (double)mid_enc_info()->zero_deg);
+            } else {
+                log_printf("ERR enc read failed");
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "dir") == 0)) {
+            uint32_t dv = 0u;
+
+            if ((parse_u32(tok[2], &dv) == 0u) || (dv > 1u)) {
+                log_printf("ERR usage=enc dir <0|1>");
+            } else if (mid_enc_set_dir((uint8_t)dv) == 0u) {
+                log_printf("OK enc dir = %u", (unsigned)dv);
+            } else {
+                log_printf("ERR enc dir");
+            }
+        } else if ((n >= 2u) && (strcmp(tok[1], "raw") == 0)) {
+            uint8_t k;
+
+            for (k = 0u; k < 5u; k++) {
+                uint8_t f[3];
+
+                if (bsp_ssi_read(f) == 0u) {
+                    log_printf(" enc raw %02x %02x %02x",
+                               (unsigned)f[0], (unsigned)f[1], (unsigned)f[2]);
+                } else {
+                    log_printf(" enc raw ERR");
+                }
+            }
+        } else if (e->valid == 0u) {
+            log_printf("enc = no frame yet (frames=%u io_err=%u)",
+                       (unsigned)e->frames, (unsigned)e->io_errs);
+        } else {
+            log_printf("enc = mech %.2f elec %.2f deg, raw %u, mg %u, crc %s",
+                       (double)e->mech_deg, (double)e->elec_deg,
+                       (unsigned)e->raw, (unsigned)e->mg,
+                       (e->crc_ok != 0u) ? "ok" : "BAD");
+            log_printf(" spd = %.2f Hz elec, %.1f rpm mech",
+                       (double)e->spd_hz, (double)e->spd_rpm);
+            log_printf(" err = %u/%u crc, %u io, zero %.1f deg, dir %u, src %s",
+                       (unsigned)e->crc_errs, (unsigned)e->frames,
+                       (unsigned)e->io_errs, (double)e->zero_deg,
+                       (unsigned)e->dir,
+                       (e->src == ENC_SRC_FLASH) ? "flash" : "default");
+        }
     }
     /* ---------------- cur ----------------- */
     else if (strcmp(tok[0], "cur") == 0) {

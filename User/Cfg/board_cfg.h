@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             44u
+#define FW_BUILD_ID             50u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -236,7 +236,36 @@ extern "C" {
 
 
 /* ==========================================================================
- * 7. Motor parameters (placeholders until measured)
+ * 7. MT6701 magnetic encoder (SSI over SPI1)
+ *    PA15 = CSN, PB3 = SCK, PB4 = MISO, PB5 = MOSI, SPI mode 1, 10.625 MHz
+ *    Frame: D[13:0] angle, Mg[3:0] status, CRC[5:0] (x^6+x+1)
+ * ========================================================================== */
+#define ENC_POLE_PAIRS          7               /* motor pole pairs */
+#define ENC_DIR_DEFAULT         0u              /* 0 = CCW positive */
+
+/* Zero offset + direction live in their own page so the current-calibration
+ * record (0x0801F800) is never touched by "enc zero". */
+#define ENC_FLASH_ADDR          0x0801F000u
+#define ENC_FLASH_MAGIC         0x31434E45u     /* ENC1 little endian */
+#define ENC_FLASH_VERSION       1u
+
+/* Read the encoder every N control frames (1 = 20kHz). */
+#define ENC_DIV                 1u
+
+/* Poll period while the bridge is off (ms). The ADC only runs in RUN, so a
+ * stopped motor needs its own timer: 1ms = 1kHz, plenty for "enc" and
+ * "enc zero". */
+#define ENC_POLL_MS             1u
+
+/* Speed is measured over this window: the angle delta accumulated over
+ * ENC_SPD_WINDOW_MS divided by the elapsed time. A time window instead of
+ * a per-sample delta keeps the 14-bit quantisation from dominating at low
+ * speed (0.022 deg/LSB). */
+#define ENC_SPD_WINDOW_MS       10u
+
+
+/* ==========================================================================
+ * 8. Motor parameters (placeholders until measured)
  * ========================================================================== */
 #define MOTOR_POLE_PAIRS        7u              /* [TBD] pole pairs */
 #define MOTOR_RS_OHM            0.5f            /* [TBD] phase resistance */

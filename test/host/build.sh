@@ -28,6 +28,7 @@ SRC="$HERE/test_main.c
      $ROOT/User/Mid/mid_vofa.c
      $ROOT/User/Mid/mid_current.c
      $ROOT/User/Mid/mid_trig.c
+     $ROOT/User/Mid/mid_enc.c
      $ROOT/User/Alg/alg_svpwm.c
      $ROOT/User/Alg/alg_vf.c
      $ROOT/User/Bsp/bsp_gpio.c
@@ -36,6 +37,8 @@ SRC="$HERE/test_main.c
      $ROOT/User/Bsp/bsp_prof.c
      $ROOT/User/Bsp/bsp_sys.c
      $HERE/fake/bsp_flash_fake.c
+     $HERE/fake/bsp_ssi_fake.c
+     $HERE/fake/bsp_cordic_fake.c
      $ROOT/User/Bsp/bsp_uart.c
      $ROOT/User/App/app_main.c
      $ROOT/User/App/app_cmd.c"

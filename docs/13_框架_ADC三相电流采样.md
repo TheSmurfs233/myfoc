@@ -52,6 +52,7 @@ void     bsp_adc_get_raw(uint16_t raw[3]);
 |---|---|
 | 存储位置 | **最后一页 2KB**：`0x0801F800`（Keil 目标 ROM 已缩到 `0x1F800`，链接器不会占用） |
 | 记录格式 | `magic('CAL1') + version + offset[3] + CRC16-CCITT`，共 16 字节 |
+| 编码器零位 | 用**前一页** `0x0801F000`（magic `'ENC1'`），与校准记录互不干扰，见 `docs/14` |
 | 写入时机 | 校准完成的**那一帧**（`mid_current_update` 内），此时桥臂处于 50% 零矢量 |
 | 写入代价 | 单 bank G4 擦/写时 CPU 停 ~20-40ms；PWM 与驱动由硬件继续，用户无感 |
 | 失效处理 | magic/version/CRC 任一不符 → 视为未校准（掉电写坏也安全） |
