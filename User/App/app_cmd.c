@@ -136,6 +136,7 @@ static void print_help(void)
     log_printf(" foc            show the FOC currents and voltages");
     log_printf(" pi <kp> <ki>   FOC PI gains (runtime), pi def restores");
     log_printf(" step <A>       measure an iq step at 20 kHz, prints the result");
+    log_printf(" ff <0..1>      back-EMF + decoupling feedforward gain");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
@@ -401,6 +402,34 @@ static void cmd_exec(char *line)
                        (double)FOC_KI_MIN, (double)FOC_KI_MAX);
         }
     }
+    /* ---------------- ff (S7.2) ----------------- */
+    else if (strcmp(tok[0], "ff") == 0) {
+        float k_emf;
+        float l_h;
+        float gain;
+
+        app_foc_get_ff(&k_emf, &l_h, &gain);
+
+        if (n == 2u) {
+            float g;
+
+            if (!parse_duty(tok[1], &g)) {
+                log_printf("ERR usage=ff <0..1>, ff shows the values");
+            } else if (g > 1.0f) {
+                log_printf("ERR usage=ff <0..1>, ff shows the values");
+            } else {
+                app_foc_set_ff(k_emf, l_h, g);
+                log_printf("OK ff gain = %.2f", (double)g);
+            }
+        } else {
+            /* fmt_float2 always prints two decimals, so scale to readable units */
+            log_printf("ff gain %.2f, k_emf %.2f mV/(rad/s), L %.2f uH",
+                       (double)gain, (double)(k_emf * 1000.0f),
+                       (double)(l_h * 1e6f));
+            log_printf(" ff 0 = no feedforward, ff 1 = full");
+        }
+    }
+
     /* ---------------- step (S6.4) ----------------- */
     else if (strcmp(tok[0], "step") == 0) {
         float amp;

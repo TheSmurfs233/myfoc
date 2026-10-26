@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             84u
+#define FW_BUILD_ID             86u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -305,6 +305,15 @@ extern "C" {
 #define FOC_V_LIM               5.7f
 #define FOC_KP                  3.00f
 #define FOC_KI                  11000.0f
+/* S7.2 feedforward. K_emf from KV: 330 rpm/V -> 3.03 mV per mechanical rpm,
+ * and w_e = rpm*7*2*pi/60 = rpm*0.733 rad/s, so 4.13 mV per electrical rad/s.
+ * (The first estimate of 3.98 used 220 Hz for a speed that was really ~175 Hz.) */
+#define FOC_K_EMF               0.00413f  /* V per electrical rad/s     */
+#define FOC_L_H                 0.0005f   /* phase inductance, H        */
+#define FOC_FF_GAIN             1.0f      /* 0 = off, 1 = full          */
+#define FOC_FF_LO_W             100.0f    /* FF fades in above 16 Hz elec */
+#define FOC_FF_HI_W             300.0f    /* FF full above 48 Hz elec     */
+
 #define FOC_I_MAX_A             1.20f    /* reference vector limit (ADC +-1.32 A) */
 /* Runtime tuning limits for the "pi" command. */
 #define FOC_KP_MIN              0.05f

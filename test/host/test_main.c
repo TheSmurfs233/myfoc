@@ -1877,7 +1877,7 @@ static void test_cmd(void)
         alg_foc_init(&f, 12.0f, 0.95f, 1.57f, 7227.0f, 5.7f);
 
         for (k = 0u; k < 20000u; k++) {
-            (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f,
+            (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
                                0.5f, 0.0f, 0.00005f, duty);
         }
 
@@ -1900,7 +1900,7 @@ static void test_cmd(void)
         float mag;
 
         alg_foc_init(&f, 12.0f, 0.95f, 50.0f, 0.0f, 5.7f);
-        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f,
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 1.0f, 1.0f,
                            0.00005f, duty);
         mag = sqrtf((f.vd * f.vd) + (f.vq * f.vq));
         T(mag <= 5.71f);
@@ -2086,6 +2086,52 @@ static void test_cmd(void)
         printf("      [spd] final rpm=%.1f iq=%.3f\n", (double)(w * 9.5492966f), (double)iq);
         T(w > 5.0f);
         T(fabsf((w * 9.5492966f) - 300.0f) < 60.0f);
+    }
+    section_end();
+
+    section("foc: feedforward injects the back-EMF term");
+    {
+        alg_foc_t f;
+        float duty[3];
+
+        /* no PI at all: the output is the feedforward only */
+        alg_foc_init(&f, 12.0f, 0.95f, 0.0f, 0.0f, 5.7f);
+        alg_foc_set_ff(&f, 0.004f, 0.0005f, 1.0f);
+
+        /* stopped: no feedforward */
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.00005f, duty);
+        T(fabsf(f.vq) < 1e-6f);
+
+        /* 1000 rad/s electrical -> vq = 0.004 * 1000 = 4.0 V */
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 1000.0f, 0.0f, 0.0f, 0.00005f, duty);
+        T(fabsf(f.vq - 4.0f) < 0.02f);
+        T(fabsf(f.vd) < 0.02f);
+
+        /* reversed rotation flips the sign */
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, -1000.0f, 0.0f, 0.0f, 0.00005f, duty);
+        T(fabsf(f.vq + 4.0f) < 0.02f);
+
+        /* gain 0 disables everything */
+        alg_foc_set_ff(&f, 0.004f, 0.0005f, 0.0f);
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, 1000.0f, 0.0f, 0.0f, 0.00005f, duty);
+        T(fabsf(f.vq) < 1e-6f);
+    }
+    section_end();
+
+    section("foc: feedforward cancels the coupling term");
+    {
+        alg_foc_t f;
+        float duty[3];
+
+        alg_foc_init(&f, 12.0f, 0.95f, 0.0f, 0.0f, 5.7f);
+        alg_foc_set_ff(&f, 0.0f, 0.001f, 1.0f);   /* only the L coupling */
+
+        /* theta = 90 deg, so ia = 0.3 gives iq = -0.3 and id = 0 */
+        (void)alg_foc_step(&f, 0.3f, -0.15f, -0.15f, 1.5707963f,
+                           1000.0f, 0.0f, 0.0f, 0.00005f, duty);
+        T(fabsf(f.iq + 0.3f) < 0.02f);
+        /* vd = -w*L*iq = -1000*0.001*(-0.3) = +0.3 V */
+        T(fabsf(f.vd - 0.3f) < 0.02f);
     }
     section_end();
 

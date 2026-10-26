@@ -144,6 +144,10 @@ uint8_t app_foc_set(float id, float iq);
 /* Runtime PI tuning (takes effect immediately, integrators are reset).
  * Returns 0 = OK, 1 = value out of range, 4 = wrong mode. */
 uint8_t app_foc_set_pi(float kp, float ki);
+
+/* S7.2 feedforward: k_emf in V/(elec rad/s), l_h in H, gain 0..1. */
+void app_foc_set_ff(float k_emf, float l_h, float gain);
+void app_foc_get_ff(float *k_emf, float *l_h, float *gain);
 void    app_foc_get_pi(float *kp, float *ki);
 
 typedef struct {

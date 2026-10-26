@@ -207,6 +207,9 @@ void app_init(void)
     /* FOC defaults; the "pi" command changes them at runtime. */
     alg_foc_init(&s_foc, FOC_VDC_NOMINAL, FOC_M_MAX,
                  FOC_KP, FOC_KI, FOC_V_LIM);
+    alg_foc_set_ff(&s_foc, FOC_K_EMF, FOC_L_H, FOC_FF_GAIN);
+    s_foc.ff_lo = FOC_FF_LO_W;
+    s_foc.ff_hi = FOC_FF_HI_W;
 
     alg_vf_init(&s_vf);
     s_vf_info.on       = 0u;
@@ -644,6 +647,18 @@ uint8_t app_foc_set_pi(float kp, float ki)
     return 0u;
 }
 
+void app_foc_set_ff(float k_emf, float l_h, float gain)
+{
+    alg_foc_set_ff(&s_foc, k_emf, l_h, gain);
+}
+
+void app_foc_get_ff(float *k_emf, float *l_h, float *gain)
+{
+    if (k_emf != 0) { *k_emf = s_foc.k_emf; }
+    if (l_h   != 0) { *l_h   = s_foc.l_h; }
+    if (gain  != 0) { *gain  = s_foc.ff_gain; }
+}
+
 void app_foc_get_pi(float *kp, float *ki)
 {
     if (kp != 0) { *kp = s_foc.pi_d.kp; }
@@ -864,8 +879,10 @@ static void task_foc(uint32_t t_pick)
         iq_ref *= k;
     }
 
+    /* S7.2: electrical angular speed for the feedforward, signed. */
     (void)alg_foc_step(&s_foc, cs->ia, cs->ib, cs->ic,
                        e->elec_deg * 0.0174532925199433f,
+                       e->spd_hz * 6.283185307179586f,
                        id_ref, iq_ref, FOC_TS, duty);
 
     for (i = 0u; i < 3u; i++) {

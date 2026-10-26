@@ -34,6 +34,12 @@ void alg_foc_init(alg_foc_t *f, float vdc, float m_max,
     alg_pi_init(&f->pi_d, kp, ki, -v_lim, v_lim);
     alg_pi_init(&f->pi_q, kp, ki, -v_lim, v_lim);
 
+    f->k_emf   = 0.0f;
+    f->l_h     = 0.0f;
+    f->ff_gain = 0.0f;
+    f->ff_lo   = 100.0f;   /* 16 Hz electrical                   */
+    f->ff_hi   = 300.0f;   /* 48 Hz electrical                   */
+
     f->vdc   = (vdc > 0.0f) ? vdc : 12.0f;
     f->m_max = (m_max > 0.0f) ? m_max : 1.0f;
     if (f->m_max > ALG_SVPWM_M_MAX) {
@@ -58,6 +64,19 @@ void alg_foc_reset(alg_foc_t *f)
     f->m  = 0.0f;
 }
 
+void alg_foc_set_ff(alg_foc_t *f, float k_emf, float l_h, float gain)
+{
+    if (f == 0) {
+        return;
+    }
+    f->k_emf   = (k_emf > 0.0f) ? k_emf : 0.0f;
+    f->l_h     = (l_h   > 0.0f) ? l_h   : 0.0f;
+    f->ff_gain = (gain  > 0.0f) ? gain  : 0.0f;
+    if (f->ff_gain > 1.0f) {
+        f->ff_gain = 1.0f;
+    }
+}
+
 void alg_clarke(float ia, float ib, float *alpha, float *beta)
 {
     if (alpha != 0) { *alpha = ia; }
@@ -80,7 +99,7 @@ void alg_inv_park(float d, float q, float sin_t, float cos_t,
 
 float alg_foc_step(alg_foc_t *f,
                    float ia, float ib, float ic,
-                   float theta,
+                   float theta, float omega_e,
                    float id_ref, float iq_ref,
                    float ts,
                    float duty[3])
@@ -110,6 +129,37 @@ float alg_foc_step(alg_foc_t *f,
 
     vd = alg_pi_step(&f->pi_d, id_ref - f->id, ts);
     vq = alg_pi_step(&f->pi_q, iq_ref - f->iq, ts);
+
+    /* S7.2 feedforward: tell the loop about the coupling and back-EMF terms
+     * instead of letting the integrators discover them.
+     *   vd = R*id + L*did/dt - w*L*iq
+     *   vq = R*iq + L*diq/dt + w*L*id + w*psi
+     * K_emf already includes psi, and omega_e is signed so a reversing motor
+     * gets the right sign without a special case. */
+    if ((f->ff_gain > 0.0f) && (omega_e != 0.0f)) {
+        /* At low speed the encoder speed estimate (10 ms window) is noisy,
+         * so the feedforward mostly injects that noise into vq: measured
+         * ripple 14 -> 31 mA at 12 Hz electrical. Fade it in only once the
+         * speed is high enough for the term to matter. */
+        float g  = f->ff_gain;
+        float av = (omega_e > 0.0f) ? omega_e : -omega_e;
+
+        if (f->ff_hi > f->ff_lo) {
+            float a = (av - f->ff_lo) / (f->ff_hi - f->ff_lo);
+
+            if (a < 0.0f) { a = 0.0f; }
+            if (a > 1.0f) { a = 1.0f; }
+            g *= a;
+        }
+
+        if (g > 0.0f) {
+            float wl = g * f->l_h * omega_e;
+
+            vd -= wl * f->iq;
+            vq += wl * f->id;
+            vq += g * f->k_emf * omega_e;
+        }
+    }
 
     /* Voltage circle: keep the vector direction, scale the magnitude. */
     mag = sqrtf((vd * vd) + (vq * vq));
