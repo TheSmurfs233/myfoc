@@ -762,7 +762,6 @@ static void task_foc(uint32_t t_pick)
                 s_step_tail_max = -1e9f;
                 s_step_tail_sum = 0.0f;
                 s_step_tail_n   = 0u;
-                s_step.amp    = s_step.amp;   /* keep the amplitude */
                 s_foc_info.iq_ref = s_step.amp;
             }
         }
@@ -779,9 +778,11 @@ static void task_foc(uint32_t t_pick)
             /* measured iq from the previous step is the sample for this frame */
             s_step_n++;
             if (s_step_n > 4u) {         /* skip the one-frame delay */
-                float y = s_foc.iq;
-                float y10 = 0.1f * s_step.amp;
-                float y90 = 0.9f * s_step.amp;
+                /* Magnitudes, so "step -0.30" measures the same way. */
+                float y    = fabsf(s_foc.iq);
+                float amp  = fabsf(s_step.amp);
+                float y10  = 0.1f * amp;
+                float y90  = 0.9f * amp;
 
                 if ((s_step_got10 == 0u) && (y >= y10)) {
                     s_step_got10 = 1u;
@@ -805,15 +806,16 @@ static void task_foc(uint32_t t_pick)
             if (er >= (uint32_t)STEP_RECORD_MS) {
                 s_step_phase = 0u;
                 s_step.valid = 1u;
-                s_step.rise_ms = 0.0f;
+                s_step.rise_ms = -1.0f;      /* -1 = not measurable */
                 if ((s_step_got10 != 0u) && (s_step_got90 != 0u) &&
                     (s_step_t90 >= s_step_t10)) {
                     s_step.rise_ms = (float)(s_step_t90 - s_step_t10) * 0.05f;
                 }
                 s_step.overshoot = 0.0f;
-                if (s_step.amp > 0.05f) {
+                if (fabsf(s_step.amp) > 0.05f) {
                     s_step.overshoot =
-                        ((s_step_peak - s_step.amp) / s_step.amp) * 100.0f;
+                        ((s_step_peak - fabsf(s_step.amp)) / fabsf(s_step.amp))
+                        * 100.0f;
                     if (s_step.overshoot < 0.0f) { s_step.overshoot = 0.0f; }
                 }
                 s_step.err = 0.0f;
@@ -821,8 +823,9 @@ static void task_foc(uint32_t t_pick)
                 if (s_step_tail_n != 0u) {
                     float avg = s_step_tail_sum / (float)s_step_tail_n;
                     s_step.ss = avg;
-                    if (s_step.amp > 0.05f) {
-                        s_step.err = ((avg - s_step.amp) / s_step.amp) * 100.0f;
+                    if (fabsf(s_step.amp) > 0.05f) {
+                        s_step.err = ((fabsf(avg) - fabsf(s_step.amp))
+                                      / fabsf(s_step.amp)) * 100.0f;
                         if (s_step.err < 0.0f) { s_step.err = -s_step.err; }
                     }
                     s_step.ripple = s_step_tail_max - s_step_tail_min;
@@ -833,10 +836,17 @@ static void task_foc(uint32_t t_pick)
                 /* rise == 0 means the current crossed 10% and 90% inside a
                  * single 50 us sample: at 0.3 A the slew is voltage limited
                  * (di/dt = V/L ~ 11 A/ms), so there is no ramp to resolve. */
-                log_printf("OK step %.2f A, rise %.2f ms, over %.1f%%, err %.1f%%, rip %.0f mA",
-                           (double)s_step.amp, (double)s_step.rise_ms,
-                           (double)s_step.overshoot, (double)s_step.err,
-                           (double)(s_step.ripple * 1000.0f));
+                if (s_step.rise_ms < 0.0f) {
+                    log_printf("OK step %.2f A, rise n/a, over %.1f%%, err %.1f%%, rip %.0f mA",
+                               (double)s_step.amp, (double)s_step.overshoot,
+                               (double)s_step.err,
+                               (double)(s_step.ripple * 1000.0f));
+                } else {
+                    log_printf("OK step %.2f A, rise %.2f ms, over %.1f%%, err %.1f%%, rip %.0f mA",
+                               (double)s_step.amp, (double)s_step.rise_ms,
+                               (double)s_step.overshoot, (double)s_step.err,
+                               (double)(s_step.ripple * 1000.0f));
+                }
                 log_printf(" ss %.3f A, peak %.3f A, tail n=%u",
                            (double)s_step.ss, (double)s_step.peak,
                            (unsigned)s_step_tail_n);
