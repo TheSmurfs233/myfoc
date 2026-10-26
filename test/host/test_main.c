@@ -36,6 +36,7 @@
 #include "alg_vf.h"
 #include "alg_pi.h"
 #include "alg_foc.h"
+#include "alg_spd.h"
 #include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
@@ -1981,6 +1982,110 @@ static void test_cmd(void)
         T(fabsf(ki - FOC_KI) < 1.0f);
 
         cmd_feed("mode 0\r\n");
+    }
+    section_end();
+
+    section("spd: feedforward and kick shape the output");
+    {
+        alg_spd_t sp;
+        float out;
+        uint16_t k;
+
+        alg_spd_init(&sp, 0.05f, 0.5f, 1.2f, 0.015f, 8e-5f, 0.15f, 50.0f);
+        sp.on = 1u;
+
+        /* target zero -> zero output, no kick */
+        sp.spd_ref = 0.0f;
+        T(alg_spd_step(&sp, 0.0f, 0.001f) == 0.0f);
+
+        /* rotor stopped with a non-zero target -> at least the breakaway
+         * current, otherwise the cogging detent would hold it forever */
+        sp.spd_ref = 300.0f;
+        out = alg_spd_step(&sp, 0.0f, 0.001f);
+        T(out >= 0.15f);
+
+        /* once it turns (above kick_rpm) the kick is gone: PI + feedforward */
+        alg_spd_reset(&sp);
+        sp.on = 1u;
+        sp.spd_ref = 300.0f;
+        out = alg_spd_step(&sp, 300.0f, 0.001f);
+        T(out > 0.0f);
+        T(out < 0.15f);
+
+        /* negative target with the rotor stopped -> negative kick */
+        alg_spd_reset(&sp);
+        sp.on = 1u;
+        sp.spd_ref = -300.0f;
+        out = alg_spd_step(&sp, 0.0f, 0.001f);
+        T(out <= -0.15f);
+
+        /* the output never exceeds the current limit */
+        alg_spd_reset(&sp);
+        sp.on = 1u;
+        sp.spd_ref = 2000.0f;
+        {
+            uint8_t inside = 1u;
+
+            for (k = 0u; k < 2000u; k++) {
+                out = alg_spd_step(&sp, 0.0f, 0.001f);
+                if ((out > 1.201f) || (out < -1.201f)) { inside = 0u; }
+            }
+            T(inside == 1u);           /* never left the current limit */
+        }
+        T(out > 1.0f);                 /* it did saturate high */
+    }
+    section_end();
+
+    section("spd: closed loop on an inertia + friction model");
+    {
+        alg_spd_t sp;
+        float w = 0.0f;                /* rad/s mechanical          */
+        float iq;
+        float rpm;
+        uint16_t n;
+
+        /* Kt = 0.0289 Nm/A; J = 8e-5 kg m2 back-calculated from the S7.0
+         * measurement (0.12 A ramps the rotor to ~400 rpm in ~1 s);
+         * viscous 2.8e-5 Nm/(rad/s); coulomb 8.7e-4 Nm (~0.03 A). */
+        const float kt = 0.0289f;
+        const float j  = 8e-5f;
+        const float bv = 2.8e-5f;
+        const float tc = 8.7e-4f;
+
+        alg_spd_init(&sp, 0.05f, 0.5f, 1.2f, 0.015f, 8e-5f, 0.15f, 50.0f);
+        sp.on = 1u;
+        sp.spd_ref = 300.0f;
+
+        for (n = 0u; n < 8000u; n++) {          /* 8 s at 1 kHz */
+            rpm = w * 9.5492966f;               /* rad/s -> rpm  */
+            iq  = alg_spd_step(&sp, rpm, 0.001f);
+
+            {
+                float tq = kt * iq;
+                float fr = bv * w;
+
+                if ((w > 1e-4f) || (tq > tc)) {
+                    fr += tc;                   /* kinetic friction */
+                } else if ((w < -1e-4f) || (tq < -tc)) {
+                    fr -= tc;
+                }
+                if (tq > fr) {
+                    w += (tq - fr) / j * 0.001f;
+                } else if (tq < fr) {
+                    w += (tq + fr) / j * 0.001f;
+                    if (w < 0.0f) { w = 0.0f; }
+                }
+                if (w < 0.0f) { w = 0.0f; }
+            }
+
+            if (w > 200.0f) { w = 200.0f; }     /* keep the test bounded */
+        }
+
+        /* It must have accelerated from standstill and the error must be
+         * small at the end of the run. */
+        printf("      [spd] final rpm=%.1f iq=%.3f\n", (double)(w * 9.5492966f), (double)iq);
+        T(w > 5.0f);
+        T(fabsf((w * 9.5492966f) - 300.0f) < 60.0f);
     }
     section_end();
 
