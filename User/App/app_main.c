@@ -22,6 +22,7 @@
 #include "alg_svpwm.h"
 #include "alg_vf.h"
 #include "alg_foc.h"
+#include "alg_spd.h"
 #include "bsp_adc.h"
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
@@ -54,6 +55,10 @@ static app_vf_info_t s_vf_info;
 static alg_foc_t      s_foc;
 static app_foc_info_t s_foc_info;
 static uint8_t        s_foc_trip_cnt;
+
+/* S7.3 speed loop. */
+static alg_spd_t s_spd;
+static uint8_t   s_spd_div;
 
 /* S6.4: automatic current step measurement. */
 static app_step_info_t s_step;
@@ -208,6 +213,12 @@ void app_init(void)
     alg_foc_init(&s_foc, FOC_VDC_NOMINAL, FOC_M_MAX,
                  FOC_KP, FOC_KI, FOC_V_LIM);
     alg_foc_set_ff(&s_foc, FOC_K_EMF, FOC_L_H, FOC_FF_GAIN);
+    s_foc.ff_lo = FOC_FF_LO_W;
+    s_foc.ff_hi = FOC_FF_HI_W;
+
+    alg_spd_init(&s_spd, SPD_KP, SPD_KI, FOC_I_MAX_A,
+                 SPD_FF_BASE, SPD_FF_SLOPE, SPD_KICK, SPD_KICK_RPM);
+    s_spd_div = 0u;
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
 
@@ -533,6 +544,7 @@ uint8_t app_stop(void)
 {
     alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
     alg_foc_reset(&s_foc);
+    app_spd_off();
     s_step_phase       = 0u;             /* cancel any running step */
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
@@ -663,6 +675,53 @@ void app_foc_get_pi(float *kp, float *ki)
 {
     if (kp != 0) { *kp = s_foc.pi_d.kp; }
     if (ki != 0) { *ki = s_foc.pi_d.ki; }
+}
+
+uint8_t app_spd_set(float rpm)
+{
+    if (s_st.state != APP_ST_RUN) { return 2u; }
+    if (s_st.mode != CTRL_FOC)    { return 4u; }
+    if ((rpm > SPD_RPM_MAX) || (rpm < -SPD_RPM_MAX)) { return 5u; }
+
+    if ((rpm < 0.5f) && (rpm > -0.5f)) {
+        app_spd_off();
+        return 0u;
+    }
+
+    s_spd.spd_ref = rpm;
+    s_spd.on      = 1u;
+    s_spd_div     = (uint8_t)SPD_DIV;   /* run a step on the next frame */
+    alg_pi_reset(&s_spd.pi);
+    s_foc_info.spd_ref = rpm;
+    return 0u;
+}
+
+void app_spd_off(void)
+{
+    s_spd.on      = 0u;
+    s_spd.spd_ref = 0.0f;
+    s_spd.out     = 0.0f;
+    alg_pi_reset(&s_spd.pi);
+    s_foc_info.spd_ref = 0.0f;
+    s_foc_info.id_ref  = 0.0f;
+    s_foc_info.iq_ref  = 0.0f;
+}
+
+uint8_t app_spd_set_pi(float kp, float ki)
+{
+    if ((kp < 0.0f) || (kp > 5.0f))   { return 1u; }
+    if ((ki < 0.0f) || (ki > 50.0f))  { return 1u; }
+
+    s_spd.pi.kp = kp;
+    s_spd.pi.ki = ki;
+    alg_pi_reset(&s_spd.pi);
+    return 0u;
+}
+
+void app_spd_get_pi(float *kp, float *ki)
+{
+    if (kp != 0) { *kp = s_spd.pi.kp; }
+    if (ki != 0) { *ki = s_spd.pi.ki; }
 }
 
 uint8_t app_step_start(float amp)
@@ -867,6 +926,18 @@ static void task_foc(uint32_t t_pick)
                            (unsigned)s_step_tail_n);
             }
         }
+    }
+
+    /* ---- S7.3 speed loop: 1 kHz, drives iq_ref (d stays at zero) ---- */
+    if (s_spd.on != 0u) {
+        s_spd_div++;
+        if (s_spd_div >= (uint8_t)SPD_DIV) {
+            s_spd_div = 0u;
+            (void)alg_spd_step(&s_spd, e->spd_rpm, SPD_TS_S);
+            s_foc_info.iq_ref = s_spd.out;
+            s_foc_info.id_ref = 0.0f;
+        }
+        s_foc_info.spd_rpm = e->spd_rpm;
     }
 
     /* ---- reference vector limit: never ask for more than the ADC range ---- */

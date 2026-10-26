@@ -2135,6 +2135,55 @@ static void test_cmd(void)
     }
     section_end();
 
+    section("cmd: spd needs FOC + start, and spi tunes the gains");
+    {
+        tx_clear();
+        cmd_feed("mode 1\r\n");
+        cmd_feed("start\r\n");
+        tx_clear();
+        cmd_feed("spd 300\r\n");
+        T(tx_contains("ERR mode 2 first"));
+
+        cmd_feed("stop\r\n");
+        cmd_feed("mode 2\r\n");
+        tx_clear();
+        cmd_feed("spd 300\r\n");
+        T(tx_contains("ERR start first"));
+
+        cmd_feed("start\r\n");
+        tx_clear();
+        cmd_feed("spd 300\r\n");
+        T(tx_contains("OK spd target = 300 rpm"));
+
+        tx_clear();
+        cmd_feed("spd\r\n");
+        T(tx_contains("spd ref 300 rpm"));
+
+        tx_clear();
+        cmd_feed("spd 9999\r\n");
+        T(tx_contains("ERR speed too high"));
+
+        tx_clear();
+        cmd_feed("spd off\r\n");
+        T(tx_contains("OK spd off"));
+
+        tx_clear();
+        cmd_feed("spi 0.10 1.0\r\n");
+        T(tx_contains("OK spi = 0.10/1.00"));
+
+        tx_clear();
+        cmd_feed("spi\r\n");
+        T(tx_contains("spi = kp 0.10"));
+
+        tx_clear();
+        cmd_feed("spi 99 1\r\n");
+        T(tx_contains("ERR spi out of range"));
+
+        cmd_feed("stop\r\n");
+        cmd_feed("mode 0\r\n");
+    }
+    section_end();
+
     section("cmd: unknown command");
     tx_clear();
     cmd_feed("foobar\r\n");

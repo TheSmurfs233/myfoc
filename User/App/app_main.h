@@ -134,6 +134,8 @@ typedef struct {
     float vq;
     float m;          /* modulation index used                */
     uint32_t faults;  /* frames aborted by the current guard  */
+    float    spd_ref; /* speed reference, rpm (0 = speed loop off) */
+    float    spd_rpm; /* measured speed used by the speed loop     */
     uint8_t  ready;   /* at least one FOC step has run        */
 } app_foc_info_t;
 
@@ -164,6 +166,13 @@ typedef struct {
 /* Run an automatic iq step (needs RUN + CTRL_FOC). The metric is computed
  * in firmware at 20 kHz, so it does not depend on the waveform rate.
  * Returns 0 = OK, 2 = not running, 4 = wrong mode, 5 = |I| out of range. */
+/* ---------------- speed loop (S7.3) ---------------- */
+/* Target in rpm, signed. 0 = speed loop off. */
+uint8_t app_spd_set(float rpm);
+void    app_spd_off(void);
+uint8_t app_spd_set_pi(float kp, float ki);
+void    app_spd_get_pi(float *kp, float *ki);
+
 uint8_t app_step_start(float amp);
 const app_step_info_t *app_step_info(void);
 const app_foc_info_t *app_foc_info(void);

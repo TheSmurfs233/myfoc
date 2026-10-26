@@ -137,6 +137,8 @@ static void print_help(void)
     log_printf(" pi <kp> <ki>   FOC PI gains (runtime), pi def restores");
     log_printf(" step <A>       measure an iq step at 20 kHz, prints the result");
     log_printf(" ff <0..1>      back-EMF + decoupling feedforward gain");
+    log_printf(" spd <rpm>      speed loop target, spd off releases iq");
+    log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
@@ -402,6 +404,74 @@ static void cmd_exec(char *line)
                        (double)FOC_KI_MIN, (double)FOC_KI_MAX);
         }
     }
+    /* ---------------- spd (S7.3) ----------------- */
+    else if (strcmp(tok[0], "spd") == 0) {
+        const app_foc_info_t *f = app_foc_info();
+
+        if ((n == 2u) && (strcmp(tok[1], "off") == 0)) {
+            app_spd_off();
+            log_printf("OK spd off, iq released");
+        } else if (n == 2u) {
+            float rpm;
+
+            if (!parse_num(tok[1], &rpm)) {
+                log_printf("ERR usage=spd <rpm> | spd off | spd");
+            } else {
+                switch (app_spd_set(rpm)) {
+                case 0u:
+                    log_printf("OK spd target = %d rpm", (int)rpm);
+                    break;
+                case 2u:
+                    log_printf("ERR start first");
+                    break;
+                case 4u:
+                    log_printf("ERR mode 2 first (FOC)");
+                    break;
+                default:
+                    log_printf("ERR speed too high, |rpm| <= %d", (int)SPD_RPM_MAX);
+                    break;
+                }
+            }
+        } else {
+            log_printf("spd ref %d rpm, meas %d rpm, iq %.2f A",
+                       (int)f->spd_ref, (int)f->spd_rpm,
+                       (double)f->iq_ref);
+            log_printf(" speed loop %s, spd off returns to idle",
+                       (f->spd_ref != 0.0f) ? "ON" : "OFF");
+        }
+    }
+    /* ---------------- spi (S7.3) ----------------- */
+    else if (strcmp(tok[0], "spi") == 0) {
+        float kp;
+        float ki;
+
+        app_spd_get_pi(&kp, &ki);
+
+        if (n == 3u) {
+            float nkp;
+            float nki;
+
+            if (!parse_num(tok[1], &nkp) || !parse_num(tok[2], &nki)) {
+                log_printf("ERR usage=spi <kp> <ki> | spi");
+            } else {
+                switch (app_spd_set_pi(nkp, nki)) {
+                case 0u:
+                    log_printf("OK spi = %.3f/%.3f", (double)nkp, (double)nki);
+                    break;
+                case 1u:
+                    log_printf("ERR spi out of range, kp 0..5, ki 0..50");
+                    break;
+                default:
+                    log_printf("ERR spi rejected");
+                    break;
+                }
+            }
+        } else {
+            log_printf("spi = kp %.3f A/rpm, ki %.3f A/(rpm s)",
+                       (double)kp, (double)ki);
+        }
+    }
+
     /* ---------------- ff (S7.2) ----------------- */
     else if (strcmp(tok[0], "ff") == 0) {
         float k_emf;

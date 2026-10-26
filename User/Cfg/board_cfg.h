@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             86u
+#define FW_BUILD_ID             88u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -313,6 +313,19 @@ extern "C" {
 #define FOC_FF_GAIN             1.0f      /* 0 = off, 1 = full          */
 #define FOC_FF_LO_W             100.0f    /* FF fades in above 16 Hz elec */
 #define FOC_FF_HI_W             300.0f    /* FF full above 48 Hz elec     */
+
+/* S7.3 speed loop. Runs at SPD_FREQ_HZ; the encoder speed is a 10 ms
+ * moving average, so the loop bandwidth must stay well below 20 Hz. */
+#define SPD_FREQ_HZ             1000u
+#define SPD_DIV                 (FOC_FREQ_HZ / SPD_FREQ_HZ)
+#define SPD_TS_S                (1.0f / (float)SPD_FREQ_HZ)
+#define SPD_KP                  0.008f    /* A per rpm, tuned on hardware */
+#define SPD_KI                  0.030f    /* A per (rpm*s), tuned         */
+#define SPD_FF_BASE             0.04f     /* friction feedforward, A     */
+#define SPD_FF_SLOPE            0.0f      /* A per rpm (not measurable)  */
+#define SPD_KICK                0.20f     /* breakaway current, A        */
+#define SPD_KICK_RPM            50.0f     /* kick only below this speed  */
+#define SPD_RPM_MAX             2000.0f   /* target limit                */
 
 #define FOC_I_MAX_A             1.20f    /* reference vector limit (ADC +-1.32 A) */
 /* Runtime tuning limits for the "pi" command. */
