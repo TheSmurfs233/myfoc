@@ -130,7 +130,7 @@ def main():
     # ---------- 1. help ----------
     out = lk.send("help")
     ls = lines(out)
-    check("help: 27 lines", len(ls) == 27, "got %d" % len(ls))
+    check("help: 32 lines", len(ls) == 32, "got %d" % len(ls))
     check("help: first line", ls and ls[0] == "[log] ---- commands ----", ls[0] if ls else "-")
     check("help: last line", ls and ls[-1] == "[log] ------------------", ls[-1] if ls else "-")
     check("help: rate says 1..500",
@@ -297,9 +297,10 @@ def main():
     check("wave: CSV rows captured", len(csv) > 300, "rows=%d" % len(csv))
     check("wave: no stray non-CSV lines in stream", not other, str(other[:3]))
 
-    # every row must have exactly 10 fields: t, duty a/b/c, ia/ib/ic, enc mech/elec/spd
-    bad = [x for x in csv if len(x.split(",")) != 10]
-    check("wave: every row has 10 channels", not bad, str(bad[:2]))
+    # every row must have exactly 16 fields: t, duty a/b/c, ia/ib/ic,
+    # enc mech/elec/spd, id, iq, id_ref, iq_ref, vd, vq
+    bad = [x for x in csv if len(x.split(",")) != 16]
+    check("wave: every row has 16 channels", not bad, str(bad[:2]))
 
     rows = [[float(v) for v in x.split(",")] for x in csv]
     if rows:

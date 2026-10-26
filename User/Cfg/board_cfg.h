@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             74u
+#define FW_BUILD_ID             83u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -281,6 +281,43 @@ extern "C" {
 #define ALIGN_SETTLE_MS         1000u   /* let the rotor catch up before averaging */
 #define ALIGN_I_MAX_A           1.28f   /* abort above this (ADC range 1.32 A) */
 #define ALIGN_TIMEOUT_MS        18000u  /* two sweeps plus margin */
+
+/* VOFA+ waveform: number of channels per frame (FireWater: 5 bytes each).
+ *   0 time, 1..3 duties, 4..6 phase currents, 7..9 encoder,
+ *   10 id, 11 iq, 12 id_ref, 13 iq_ref, 14 vd, 15 vq
+ * 16 channels * 5 B = 80 B per frame; at 500 Hz that is 40 kB/s of the
+ * 100 kB/s the 1 Mbaud link provides. */
+#define WAVE_CH                 16u
+
+/* FOC current loop (S6).
+ * Design start: R = 2.3 ohm/phase, L = 0.5 mH, fc = 500 Hz ->
+ *   Kp = 2*pi*fc*L = 1.57 V/A, Ki = 2*pi*fc*R = 7227 V/(A*s).
+ * Measured with the "step" command (stall, 20 kHz, step 0.80 A):
+ *   kp 0.80 / ki  4000 -> rise 1.05 ms, ripple 27.7 mA
+ *   kp 1.57 / ki  7227 -> rise 0.50 ms, ripple 11.1 mA   (old default)
+ *   kp 3.00 / ki 11000 -> rise 0.20 ms, ripple 10.0 mA   (adopted)
+ *   kp 4.00 / ki 15000 -> rise 0.10 ms, ripple  6.1 mA   (voltage slew limit)
+ * 3.0/11000 is about 955 Hz of current bandwidth and still well damped,
+ * so it is the new default; "pi" can change it at runtime.
+ * The bus voltage is the nominal 12 V until the Vbus ADC is wired (S7). */
+#define FOC_VDC_NOMINAL         12.0f
+#define FOC_M_MAX               0.95f    /* 0.5*Vdc*0.95 = 5.7 V phase amp */
+#define FOC_V_LIM               5.7f
+#define FOC_KP                  3.00f
+#define FOC_KI                  11000.0f
+#define FOC_I_MAX_A             1.20f    /* reference vector limit (ADC +-1.32 A) */
+/* Runtime tuning limits for the "pi" command. */
+#define FOC_KP_MIN              0.05f
+#define FOC_KP_MAX              20.0f
+#define FOC_KI_MIN              0.0f
+#define FOC_KI_MAX              50000.0f
+
+/* "step": settle first, then step iq and record for STEP_MS. */
+#define STEP_SETTLE_MS          100u
+#define STEP_RECORD_MS          20u
+
+#define FOC_I_TRIP_A            1.28f    /* abort above this */
+#define FOC_TRIP_FRAMES         5u
 
 /* Read the encoder every N control frames (1 = 20kHz). */
 #define ENC_DIV                 1u

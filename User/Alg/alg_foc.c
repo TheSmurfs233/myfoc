@@ -118,10 +118,12 @@ float alg_foc_step(alg_foc_t *f,
         vd *= k;
         vq *= k;
         mag = f->v_lim;               /* report the clamped magnitude */
-        /* The PI integrators were wound up against a limit they cannot reach;
-         * clamping them also keeps the recovery free of overshoot. */
-        f->pi_d.integ = vd - (f->pi_d.kp * (id_ref - f->id));
-        f->pi_q.integ = vq - (f->pi_q.kp * (iq_ref - f->iq));
+        /* Anti-windup for a VECTOR limit: scale both integrators by the same
+         * factor k. Recomputing them per axis (the first attempt) let the two
+         * axes fight each other, which swung the voltage vector direction by
+         * tens of degrees while saturated (measured: vd jumping +/-3.5 V). */
+        f->pi_d.integ *= k;
+        f->pi_q.integ *= k;
     }
     f->vd = vd;
     f->vq = vq;

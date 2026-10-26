@@ -1497,10 +1497,14 @@ static void test_app(void)
     (void)app_set_mode(0u);                    /* CTRL_IDLE */
     T(app_start() == 2u);                      /* rejected: no mode */
     T(app_status()->state == APP_ST_IDLE);
-    (void)app_set_mode(2u);                    /* CTRL_FOC: no loop yet */
-    T(app_start() == 3u);                      /* rejected until S6 */
-    T(app_status()->state == APP_ST_IDLE);
-    T(bsp_pwm_is_enabled() == 0u);             /* bridge still off */
+    (void)app_set_mode(2u);                    /* CTRL_FOC: S6 is in */
+    T(app_start() == 0u);
+    T(app_status()->state == APP_ST_RUN);
+    T(bsp_pwm_is_enabled() == 1u);
+    T(app_foc_info()->id_ref == 0.0f);         /* starts with zero current */
+    T(app_foc_info()->iq_ref == 0.0f);
+    (void)app_stop();
+    T(bsp_pwm_is_enabled() == 0u);
     (void)app_set_mode(1u);                    /* CTRL_OPENLOOP */
     T(app_start() == 0u);
     T(app_status()->state == APP_ST_RUN);
@@ -1614,8 +1618,10 @@ static void test_cmd(void)
     T(tx_contains("OK mode=FOC"));
     tx_clear();
     cmd_feed("start\r\n");
-    T(tx_contains("ERR mode=FOC not ready"));
-    T(app_status()->state == APP_ST_IDLE);
+    T(tx_contains("OK start, mode=FOC"));
+    T(app_status()->state == APP_ST_RUN);
+    tx_clear();
+    cmd_feed("stop\r\n");
     tx_clear();
     cmd_feed("mode 1\r\n");
     T(tx_contains("OK mode=OPENLOOP"));
@@ -1898,6 +1904,83 @@ static void test_cmd(void)
         mag = sqrtf((f.vd * f.vd) + (f.vq * f.vq));
         T(mag <= 5.71f);
         T(fabsf(f.vd - f.vq) < 0.01f);
+    }
+    section_end();
+
+    section("cmd: id/iq need FOC mode and start");
+    {
+        tx_clear();
+        cmd_feed("mode 1\r\n");
+        cmd_feed("start\r\n");
+        tx_clear();
+        cmd_feed("id 0.3\r\n");
+        T(tx_contains("ERR mode 2 first"));
+
+        cmd_feed("stop\r\n");
+        cmd_feed("mode 2\r\n");
+        tx_clear();
+        cmd_feed("id 0.3\r\n");
+        T(tx_contains("ERR start first"));
+
+        cmd_feed("start\r\n");
+        tx_clear();
+        cmd_feed("id 0.30\r\n");
+        T(tx_contains("OK id=0.30 A, iq=0.00 A"));
+        T(fabsf(app_foc_info()->id_ref - 0.30f) < 1e-4f);
+
+        tx_clear();
+        cmd_feed("iq -0.50\r\n");
+        T(tx_contains("OK id=0.30 A, iq=-0.50 A"));
+        T(fabsf(app_foc_info()->iq_ref + 0.50f) < 1e-4f);
+
+        /* the reference vector must stay inside the ADC range */
+        tx_clear();
+        cmd_feed("id 1.30\r\n");
+        T(tx_contains("ERR current too high"));
+
+        tx_clear();
+        cmd_feed("foc\r\n");
+        T(tx_contains("foc idle") || tx_contains("foc id="));
+
+        cmd_feed("stop\r\n");
+        cmd_feed("mode 0\r\n");
+    }
+    section_end();
+
+    section("cmd: pi survives start/stop and rejects out of range");
+    {
+        float kp;
+        float ki;
+
+        tx_clear();
+        cmd_feed("mode 2\r\n");
+        tx_clear();
+        cmd_feed("pi 2.50 9000\r\n");
+        T(tx_contains("OK pi = 2.50/9000"));
+
+        /* starting must NOT throw the tuned gains away */
+        cmd_feed("start\r\n");
+        app_foc_get_pi(&kp, &ki);
+        T(fabsf(kp - 2.50f) < 1e-3f);
+        T(fabsf(ki - 9000.0f) < 1.0f);
+
+        /* and stop must not either */
+        cmd_feed("stop\r\n");
+        app_foc_get_pi(&kp, &ki);
+        T(fabsf(kp - 2.50f) < 1e-3f);
+
+        tx_clear();
+        cmd_feed("pi 99 100\r\n");
+        T(tx_contains("ERR pi out of range"));
+
+        tx_clear();
+        cmd_feed("pi def\r\n");
+        T(tx_contains("default"));
+        app_foc_get_pi(&kp, &ki);
+        T(fabsf(kp - FOC_KP) < 1e-3f);
+        T(fabsf(ki - FOC_KI) < 1.0f);
+
+        cmd_feed("mode 0\r\n");
     }
     section_end();
 

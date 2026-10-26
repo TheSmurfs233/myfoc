@@ -78,7 +78,9 @@ static uint8_t parse_duty(const char *s, float *out)
         v = v * 10.0f + (float)(*s - '0');
         s++;
         digits++;
-        if (digits > 3u) { return 0u; }
+        /* 5 digits: the largest runtime value is ki = 50000. Duties and rates
+         * stay far below that, so widening the limit changes nothing there. */
+        if (digits > 5u) { return 0u; }
     }
     if (*s == '.') {
         s++;
@@ -92,6 +94,24 @@ static uint8_t parse_duty(const char *s, float *out)
     }
     if ((digits == 0u) || (*s != '\0')) { return 0u; }
     *out = v;
+    return 1u;
+}
+
+/* Signed variant for the FOC current references (the q axis goes negative
+ * when the motor is braked or driven backwards). */
+static uint8_t parse_num(const char *s, float *out)
+{
+    uint8_t neg = 0u;
+    float   v;
+
+    if ((s != 0) && (*s == (char)0x2D)) {   /* "-" */
+        neg = 1u;
+        s++;
+    }
+    if (!parse_duty(s, &v)) {
+        return 0u;
+    }
+    *out = (neg != 0u) ? -v : v;
     return 1u;
 }
 
@@ -111,6 +131,11 @@ static void print_help(void)
     log_printf(" pwm <a> <b> <c> three independent duties");
     log_printf(" cur            raw codes and phase currents");
     log_printf(" vf <hz>        open-loop V/f target, electrical Hz (needs start)");
+    log_printf(" id <A>         FOC d-axis current reference (mode 2)");
+    log_printf(" iq <A>         FOC q-axis current reference (mode 2)");
+    log_printf(" foc            show the FOC currents and voltages");
+    log_printf(" pi <kp> <ki>   FOC PI gains (runtime), pi def restores");
+    log_printf(" step <A>       measure an iq step at 20 kHz, prints the result");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
@@ -232,7 +257,7 @@ static void cmd_exec(char *line)
         uint8_t r = app_start();
         if (r == 0u)      { log_printf("OK start, mode=%s", app_mode_name(app_status()->mode)); }
         else if (r == 1u) { log_printf("ERR state=FAULT, clear the fault first"); }
-        else if (r == 3u) { log_printf("ERR mode=FOC not ready (S6), use 'mode 1'"); }
+        else if (r == 3u) { log_printf("ERR start rejected"); }
         else              { log_printf("ERR mode=IDLE, send 'mode 1' or 'mode 2' first"); }
     }
     /* ---------------- stop ---------------- */
@@ -281,6 +306,143 @@ static void cmd_exec(char *line)
             log_printf("ERR usage=pwm <d> | pwm <a> <b> <c>");
         }
     }
+    /* ---------------- id / iq (S6) ----------------- */
+    else if ((strcmp(tok[0], "id") == 0) || (strcmp(tok[0], "iq") == 0)) {
+        const app_foc_info_t *f = app_foc_info();
+
+        if (n == 2u) {
+            float amp;
+
+            if (!parse_num(tok[1], &amp)) {
+                log_printf("ERR usage=id|iq <A>, range -1.20 .. 1.20");
+            } else {
+                float id = f->id_ref;
+                float iq = f->iq_ref;
+                uint8_t rc;
+
+                if (tok[0][1] == (char)0x64) {   /* "id": second char 'd' */
+                    id = amp;
+                } else {
+                    iq = amp;
+                }
+
+                rc = app_foc_set(id, iq);
+                switch (rc) {
+                case 0u:
+                    log_printf("OK id=%.2f A, iq=%.2f A", (double)id, (double)iq);
+                    break;
+                case 2u:
+                    log_printf("ERR start first");
+                    break;
+                case 4u:
+                    log_printf("ERR mode 2 first (FOC)");
+                    break;
+                case 5u:
+                    log_printf("ERR current too high, |I| <= %.2f A",
+                               (double)FOC_I_MAX_A);
+                    break;
+                default:
+                    log_printf("ERR calibrating, wait");
+                    break;
+                }
+            }
+        } else {
+            log_printf("id=%.2f iq=%.2f A, ref %.2f/%.2f, m=%.3f",
+                       (double)f->id, (double)f->iq,
+                       (double)f->id_ref, (double)f->iq_ref, (double)f->m);
+        }
+    }
+    /* ---------------- pi (S6.4) ----------------- */
+    else if (strcmp(tok[0], "pi") == 0) {
+        float kp;
+        float ki;
+
+        app_foc_get_pi(&kp, &ki);
+
+        if ((n == 2u) && (strcmp(tok[1], "def") == 0)) {
+            switch (app_foc_set_pi(FOC_KP, FOC_KI)) {
+            case 0u:
+                log_printf("OK pi = %.2f/%.0f (default)", (double)FOC_KP, (double)FOC_KI);
+                break;
+            case 4u:
+                log_printf("ERR mode 2 first (FOC)");
+                break;
+            default:
+                log_printf("ERR pi rejected");
+                break;
+            }
+        } else if (n == 3u) {
+            float nkp;
+            float nki;
+
+            if (!parse_num(tok[1], &nkp) || !parse_num(tok[2], &nki)) {
+                log_printf("ERR usage=pi <kp> <ki> | pi def | pi");
+            } else {
+                switch (app_foc_set_pi(nkp, nki)) {
+                case 0u:
+                    log_printf("OK pi = %.2f/%.0f", (double)nkp, (double)nki);
+                    break;
+                case 1u:
+                    log_printf("ERR pi out of range, kp %.2f..%.2f",
+                               (double)FOC_KP_MIN, (double)FOC_KP_MAX);
+                    break;
+                case 4u:
+                    log_printf("ERR mode 2 first (FOC)");
+                    break;
+                default:
+                    log_printf("ERR pi rejected");
+                    break;
+                }
+            }
+        } else {
+            log_printf("pi = kp %.2f V/A, ki %.0f V/(A s)", (double)kp, (double)ki);
+            log_printf(" min kp %.2f, max kp %.2f, ki %.0f..%.0f",
+                       (double)FOC_KP_MIN, (double)FOC_KP_MAX,
+                       (double)FOC_KI_MIN, (double)FOC_KI_MAX);
+        }
+    }
+    /* ---------------- step (S6.4) ----------------- */
+    else if (strcmp(tok[0], "step") == 0) {
+        float amp;
+
+        if (n != 2u) {
+            log_printf("ERR usage=step <A>, e.g. step 0.30");
+        } else if (!parse_num(tok[1], &amp)) {
+            log_printf("ERR usage=step <A>, e.g. step 0.30");
+        } else {
+            switch (app_step_start(amp)) {
+            case 0u:
+                log_printf("OK step %.2f A, wait 0.3 s for the result", (double)amp);
+                break;
+            case 2u:
+                log_printf("ERR start first");
+                break;
+            case 4u:
+                log_printf("ERR mode 2 first (FOC)");
+                break;
+            default:
+                log_printf("ERR current too high, |I| <= %.2f A",
+                           (double)FOC_I_MAX_A);
+                break;
+            }
+        }
+    }
+
+    /* ---------------- foc ----------------- */
+    else if (strcmp(tok[0], "foc") == 0) {
+        const app_foc_info_t *f = app_foc_info();
+        if (f->ready == 0u) {
+            log_printf("foc idle, run mode 2 + start + id/iq");
+        } else {
+            log_printf("foc id=%.3f iq=%.3f A, ref %.2f/%.2f",
+                       (double)f->id, (double)f->iq,
+                       (double)f->id_ref, (double)f->iq_ref);
+            log_printf(" vd=%.2f vq=%.2f V, m=%.3f, faults %u",
+                       (double)f->vd, (double)f->vq, (double)f->m,
+                       (unsigned)f->faults);
+        }
+    }
+
     /* ---------------- vf ----------------- */
     else if (strcmp(tok[0], "vf") == 0) {
         if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {

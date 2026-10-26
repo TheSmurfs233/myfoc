@@ -21,6 +21,7 @@
 #include "board_cfg.h"
 #include "alg_svpwm.h"
 #include "alg_vf.h"
+#include "alg_foc.h"
 #include "bsp_adc.h"
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
@@ -48,6 +49,26 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 /* ---- open-loop V/f (S4) ---- */
 static alg_vf_t      s_vf;
 static app_vf_info_t s_vf_info;
+
+/* ---- FOC current loop (S6) ---- */
+static alg_foc_t      s_foc;
+static app_foc_info_t s_foc_info;
+static uint8_t        s_foc_trip_cnt;
+
+/* S6.4: automatic current step measurement. */
+static app_step_info_t s_step;
+static uint8_t         s_step_phase;    /* 0 idle, 1 settle, 2 record  */
+static uint32_t        s_step_t0;
+static uint32_t        s_step_n;
+static uint32_t        s_step_t10;
+static uint32_t        s_step_t90;
+static uint8_t         s_step_got10;
+static uint8_t         s_step_got90;
+static float           s_step_peak;
+static float           s_step_tail_min;
+static float           s_step_tail_max;
+static float           s_step_tail_sum;
+static uint32_t        s_step_tail_n;
 static uint16_t      s_i_fold_cnt;
 static uint16_t      s_i_trip_cnt;
 static uint8_t       s_trig_status;     /* mid_trig_init() result */
@@ -182,6 +203,10 @@ void app_init(void)
     s_t_enc          = s_t_1ms;
     s_wave_period_ms = (uint16_t)(1000u / s_st.wave_rate_hz);
     s_adc_seen       = 0u;
+
+    /* FOC defaults; the "pi" command changes them at runtime. */
+    alg_foc_init(&s_foc, FOC_VDC_NOMINAL, FOC_M_MAX,
+                 FOC_KP, FOC_KI, FOC_V_LIM);
 
     alg_vf_init(&s_vf);
     s_vf_info.on       = 0u;
@@ -477,8 +502,15 @@ uint8_t app_start(void)
     if (s_st.mode == CTRL_IDLE) {
         return 2u;                       /* no control mode selected */
     }
-    if (s_st.mode != CTRL_OPENLOOP) {
-        return 3u;                       /* CTRL_FOC has no current loop yet (S6) */
+    if (s_st.mode == CTRL_FOC) {
+        /* Only the STATE is cleared here. The gains are set once in
+         * app_init(), so "pi <kp> <ki>" survives start/stop: that is the
+         * order a person tunes in (set the gains, then start). */
+        alg_foc_reset(&s_foc);
+        s_foc_info.id_ref  = 0.0f;
+        s_foc_info.iq_ref  = 0.0f;
+        s_foc_info.ready   = 0u;
+        s_foc_trip_cnt     = 0u;
     }
 
     /* The ADC trigger (TIM1_CC4) only reaches the ADC while MOE=1, so the
@@ -497,6 +529,12 @@ uint8_t app_start(void)
 uint8_t app_stop(void)
 {
     alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
+    alg_foc_reset(&s_foc);
+    s_step_phase       = 0u;             /* cancel any running step */
+    s_foc_info.id_ref  = 0.0f;
+    s_foc_info.iq_ref  = 0.0f;
+    s_foc_info.ready   = 0u;
+    s_foc_trip_cnt     = 0u;
     s_vf_info.on       = 0u;
     s_vf_info.f_hz     = 0.0f;
     s_vf_info.f_target = 0.0f;
@@ -564,6 +602,79 @@ uint8_t app_vf_off(void)
     return 0u;
 }
 
+/* ------------------------------------------------------------------ */
+/* FOC current loop control (S6)                                       */
+/* ------------------------------------------------------------------ */
+uint8_t app_foc_set(float id, float iq)
+{
+    float mag;
+
+    if (s_st.state != APP_ST_RUN) {
+        return 2u;                       /* send start first */
+    }
+    if (s_st.mode != CTRL_FOC) {
+        return 4u;                       /* mode 2 required */
+    }
+    if (mid_current_get()->ready == 0u) {
+        return 3u;                       /* zero drift still being measured */
+    }
+
+    mag = sqrtf((id * id) + (iq * iq));
+    if (mag > FOC_I_MAX_A) {
+        return 5u;                       /* caller asked for too much current */
+    }
+
+    s_foc_info.id_ref = id;
+    s_foc_info.iq_ref = iq;
+    return 0u;
+}
+
+uint8_t app_foc_set_pi(float kp, float ki)
+{
+    if ((kp < FOC_KP_MIN) || (kp > FOC_KP_MAX)) { return 1u; }
+    if ((ki < FOC_KI_MIN) || (ki > FOC_KI_MAX)) { return 1u; }
+    if (s_st.mode != CTRL_FOC) { return 4u; }
+
+    s_foc.pi_d.kp = kp;
+    s_foc.pi_q.kp = kp;
+    s_foc.pi_d.ki = ki;
+    s_foc.pi_q.ki = ki;
+    alg_pi_reset(&s_foc.pi_d);          /* no stale wind-up with new gains */
+    alg_pi_reset(&s_foc.pi_q);
+    return 0u;
+}
+
+void app_foc_get_pi(float *kp, float *ki)
+{
+    if (kp != 0) { *kp = s_foc.pi_d.kp; }
+    if (ki != 0) { *ki = s_foc.pi_d.ki; }
+}
+
+uint8_t app_step_start(float amp)
+{
+    if (s_st.state != APP_ST_RUN) { return 2u; }
+    if (s_st.mode != CTRL_FOC)    { return 4u; }
+    if ((amp > FOC_I_MAX_A) || (amp < -FOC_I_MAX_A)) { return 5u; }
+
+    s_step.amp   = amp;
+    s_step.valid = 0u;
+    s_step_phase = 1u;
+    s_step_t0    = HAL_GetTick();
+    s_foc_info.id_ref = 0.0f;
+    s_foc_info.iq_ref = 0.0f;
+    return 0u;
+}
+
+const app_step_info_t *app_step_info(void)
+{
+    return &s_step;
+}
+
+const app_foc_info_t *app_foc_info(void)
+{
+    return &s_foc_info;
+}
+
 void app_vf_set_acc(float hz_per_s)
 {
     if (hz_per_s < VF_ACC_MIN_HZ_PER_S) { hz_per_s = VF_ACC_MIN_HZ_PER_S; }
@@ -588,6 +699,184 @@ const app_vf_info_t *app_vf_info(void)
  * has no jitter; S6 will move this into the ADC interrupt.
  * t_pick = DWT timestamp taken as the main loop picked the frame up, so the
  * "comp" and "wr" marks measure stage durations, not absolute offsets. */
+/* ------------------------------------------------------------------ */
+/* FOC current loop (S6)                                               */
+/* ------------------------------------------------------------------ */
+static void task_foc(uint32_t t_pick)
+{
+    const current_sample_t *cs = mid_current_get();
+    const mid_enc_t        *e  = mid_enc_info();
+    float duty[3];
+    float imax;
+    float t;
+    float id_ref;
+    float iq_ref;
+    float mag;
+    float k;
+    uint32_t t_comp;
+    uint8_t  i;
+
+    /* No encoder frame yet: hold the zero vector rather than invent an angle. */
+    if (e->valid == 0u) {
+        bsp_pwm_set_all_duty(PWM_START_DUTY);
+        return;
+    }
+
+    /* ---- current guard (S7 will replace this with a hardware trip) ---- */
+    imax = fabsf(cs->ia);
+    t = fabsf(cs->ib); if (t > imax) { imax = t; }
+    t = fabsf(cs->ic); if (t > imax) { imax = t; }
+
+    if (imax >= FOC_I_TRIP_A) {
+        if (++s_foc_trip_cnt >= FOC_TRIP_FRAMES) {
+            bsp_pwm_disable();
+            bsp_pwm_set_all_duty(PWM_START_DUTY);
+            s_st.state        = APP_ST_FAULT;
+            s_foc_info.faults++;
+            s_foc_trip_cnt    = 0u;
+            log_printf("ERR overcurrent trip I=%d mA, type stop to reset",
+                       (int)(imax * 1000.0f));
+            return;
+        }
+    } else {
+        s_foc_trip_cnt = 0u;
+    }
+
+    /* ---- S6.4 step generator: overrides the references while running ---- */
+    if (s_step_phase != 0u) {
+        uint32_t el = HAL_GetTick() - s_step_t0;
+
+        if (s_step_phase == 1u) {        /* settle at zero current */
+            s_foc_info.id_ref = 0.0f;
+            s_foc_info.iq_ref = 0.0f;
+            if (el >= (uint32_t)STEP_SETTLE_MS) {
+                s_step_phase  = 2u;
+                s_step_t0     = HAL_GetTick();
+                s_step_n      = 0u;
+                s_step_t10    = 0u;
+                s_step_t90    = 0u;
+                s_step_got10  = 0u;
+                s_step_got90  = 0u;
+                s_step_peak   = 0.0f;
+                s_step_tail_min =  1e9f;
+                s_step_tail_max = -1e9f;
+                s_step_tail_sum = 0.0f;
+                s_step_tail_n   = 0u;
+                s_step.amp    = s_step.amp;   /* keep the amplitude */
+                s_foc_info.iq_ref = s_step.amp;
+            }
+        }
+        else if (s_step_phase == 2u) {   /* record the response */
+            /* Recompute the elapsed time: s_step_t0 was just reset when this
+             * phase started, and reusing the value computed at the top of the
+             * block made the window look 100 ms old, so the report fired on
+             * the first frame and the measurement was always empty. */
+            uint32_t er = HAL_GetTick() - s_step_t0;
+
+            s_foc_info.id_ref = 0.0f;
+            s_foc_info.iq_ref = s_step.amp;
+
+            /* measured iq from the previous step is the sample for this frame */
+            s_step_n++;
+            if (s_step_n > 4u) {         /* skip the one-frame delay */
+                float y = s_foc.iq;
+                float y10 = 0.1f * s_step.amp;
+                float y90 = 0.9f * s_step.amp;
+
+                if ((s_step_got10 == 0u) && (y >= y10)) {
+                    s_step_got10 = 1u;
+                    s_step_t10   = s_step_n;
+                }
+                if ((s_step_got90 == 0u) && (y >= y90)) {
+                    s_step_got90 = 1u;
+                    s_step_t90   = s_step_n;
+                }
+                if (y > s_step_peak) { s_step_peak = y; }
+
+                /* tail window = last 5 ms, used for error and ripple */
+                if (er >= ((uint32_t)STEP_RECORD_MS - 5u)) {
+                    if (y < s_step_tail_min) { s_step_tail_min = y; }
+                    if (y > s_step_tail_max) { s_step_tail_max = y; }
+                    s_step_tail_sum += y;
+                    s_step_tail_n++;
+                }
+            }
+
+            if (er >= (uint32_t)STEP_RECORD_MS) {
+                s_step_phase = 0u;
+                s_step.valid = 1u;
+                s_step.rise_ms = 0.0f;
+                if ((s_step_got10 != 0u) && (s_step_got90 != 0u) &&
+                    (s_step_t90 >= s_step_t10)) {
+                    s_step.rise_ms = (float)(s_step_t90 - s_step_t10) * 0.05f;
+                }
+                s_step.overshoot = 0.0f;
+                if (s_step.amp > 0.05f) {
+                    s_step.overshoot =
+                        ((s_step_peak - s_step.amp) / s_step.amp) * 100.0f;
+                    if (s_step.overshoot < 0.0f) { s_step.overshoot = 0.0f; }
+                }
+                s_step.err = 0.0f;
+                s_step.ss  = 0.0f;
+                if (s_step_tail_n != 0u) {
+                    float avg = s_step_tail_sum / (float)s_step_tail_n;
+                    s_step.ss = avg;
+                    if (s_step.amp > 0.05f) {
+                        s_step.err = ((avg - s_step.amp) / s_step.amp) * 100.0f;
+                        if (s_step.err < 0.0f) { s_step.err = -s_step.err; }
+                    }
+                    s_step.ripple = s_step_tail_max - s_step_tail_min;
+                }
+                s_step.peak = s_step_peak;
+                s_foc_info.iq_ref = 0.0f;
+                s_foc_info.id_ref = 0.0f;
+                /* rise == 0 means the current crossed 10% and 90% inside a
+                 * single 50 us sample: at 0.3 A the slew is voltage limited
+                 * (di/dt = V/L ~ 11 A/ms), so there is no ramp to resolve. */
+                log_printf("OK step %.2f A, rise %.2f ms, over %.1f%%, err %.1f%%, rip %.0f mA",
+                           (double)s_step.amp, (double)s_step.rise_ms,
+                           (double)s_step.overshoot, (double)s_step.err,
+                           (double)(s_step.ripple * 1000.0f));
+                log_printf(" ss %.3f A, peak %.3f A, tail n=%u",
+                           (double)s_step.ss, (double)s_step.peak,
+                           (unsigned)s_step_tail_n);
+            }
+        }
+    }
+
+    /* ---- reference vector limit: never ask for more than the ADC range ---- */
+    id_ref = s_foc_info.id_ref;
+    iq_ref = s_foc_info.iq_ref;
+    mag = sqrtf((id_ref * id_ref) + (iq_ref * iq_ref));
+    if (mag > FOC_I_MAX_A) {
+        k = FOC_I_MAX_A / mag;
+        id_ref *= k;
+        iq_ref *= k;
+    }
+
+    (void)alg_foc_step(&s_foc, cs->ia, cs->ib, cs->ic,
+                       e->elec_deg * 0.0174532925199433f,
+                       id_ref, iq_ref, FOC_TS, duty);
+
+    for (i = 0u; i < 3u; i++) {
+        if (duty[i] < 0.0f) { duty[i] = 0.0f; }
+        if (duty[i] > 1.0f) { duty[i] = 1.0f; }
+    }
+
+    t_comp = bsp_prof_now();
+    phase_mark(&s_phase.comp, t_pick);
+    bsp_pwm_set_duty(duty[0], duty[1], duty[2]);
+    phase_mark(&s_phase.wr, t_comp);
+    bsp_prof_add(PROF_CONV, t_pick);
+
+    s_foc_info.id    = s_foc.id;
+    s_foc_info.iq    = s_foc.iq;
+    s_foc_info.vd    = s_foc.vd;
+    s_foc_info.vq    = s_foc.vq;
+    s_foc_info.m     = s_foc.m;
+    s_foc_info.ready = 1u;
+}
+
 static void task_vf(uint32_t t_pick)
 {
     const current_sample_t *cs;
@@ -765,14 +1054,28 @@ static void task_adc(void)
 
     phase_mark_isr(bsp_adc_isr_cnt());
 
-    /* S4: the V/f ramp runs once per ADC frame, right after the currents are
-     * fresh. S6 will fold the current loop into the same place. */
-    task_vf(t0);
+    if (s_st.mode == CTRL_FOC) {
+        /* The current loop needs the angle for Park, so the encoder frame is
+         * collected first. The SPI RX DMA was started in the ADC ISR, so the
+         * data is normally already there (measured: 0 late frames at 20 kHz). */
+        t_enc = bsp_prof_now();
+        mid_enc_update();
+        bsp_prof_add(PROF_ENC, t_enc);
+    } else {
+        /* S4: the V/f ramp runs once per ADC frame, right after the currents
+         * are fresh. */
+        task_vf(t0);
+    }
 
-    /* S5: the encoder is read AFTER the control chain, so its 3us SPI transfer
-     * can never delay the duty update. The angle is therefore one frame old
-     * for the next control step (S6 will move it to DMA). */
-    if (ENC_DIV <= 1u) {
+    if ((s_st.mode == CTRL_FOC) && (s_st.state == APP_ST_RUN)) {
+        task_foc(t0);
+    }
+
+    /* S5: in V/f the encoder is read AFTER the control chain, so its transfer
+     * can never delay the duty update. FOC already collected it above. */
+    if (s_st.mode == CTRL_FOC) {
+        /* already read */
+    } else if (ENC_DIV <= 1u) {
         t_enc = bsp_prof_now();
         mid_enc_update();
         bsp_prof_add(PROF_ENC, t_enc);
@@ -797,7 +1100,7 @@ static void task_adc(void)
 /* ------------------------------------------------------------------ */
 static void task_wave(uint32_t now)
 {
-    float    ch[10];
+    float    ch[WAVE_CH];
     float    a, b, c;
     uint32_t t0;
     const current_sample_t *cs;
@@ -825,8 +1128,16 @@ static void task_wave(uint32_t now)
     ch[7] = mid_enc_info()->mech_deg;
     ch[8] = mid_enc_info()->elec_deg;
     ch[9] = mid_enc_info()->spd_hz;
+    /* S6: FOC currents and references. Plotting the measured and the
+     * commanded value together is what makes a current step visible. */
+    ch[10] = s_foc_info.id;              /* measured id, A   */
+    ch[11] = s_foc_info.iq;              /* measured iq, A   */
+    ch[12] = s_foc_info.id_ref;          /* commanded id, A  */
+    ch[13] = s_foc_info.iq_ref;          /* commanded iq, A  */
+    ch[14] = s_foc_info.vd;              /* V                */
+    ch[15] = s_foc_info.vq;              /* V                */
 
-    if (vofa_send(ch, 10u) != 0u) {
+    if (vofa_send(ch, (uint8_t)WAVE_CH) != 0u) {
         s_st.wave_frames++;
     } else {
         s_st.wave_drop++;

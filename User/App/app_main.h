@@ -124,6 +124,46 @@ void    app_vf_set_acc(float hz_per_s);
 uint8_t app_vf_set_dir(uint8_t dir);
 const app_vf_info_t *app_vf_info(void);
 
+/* ---------------- FOC current loop (S6) ---------------- */
+typedef struct {
+    float id_ref;
+    float iq_ref;
+    float id;
+    float iq;
+    float vd;
+    float vq;
+    float m;          /* modulation index used                */
+    uint32_t faults;  /* frames aborted by the current guard  */
+    uint8_t  ready;   /* at least one FOC step has run        */
+} app_foc_info_t;
+
+/* Set the d/q current references (A). Requires RUN in CTRL_FOC.
+ * Returns 0 = OK, 2 = not running, 4 = wrong mode, 5 = |I| out of range. */
+uint8_t app_foc_set(float id, float iq);
+
+/* Runtime PI tuning (takes effect immediately, integrators are reset).
+ * Returns 0 = OK, 1 = value out of range, 4 = wrong mode. */
+uint8_t app_foc_set_pi(float kp, float ki);
+void    app_foc_get_pi(float *kp, float *ki);
+
+typedef struct {
+    float   amp;          /* commanded iq step, A            */
+    float   rise_ms;      /* 10% -> 90%                   */
+    float   overshoot;    /* percent of the step             */
+    float   err;          /* steady state error, percent     */
+    float   ripple;       /* peak to peak in the tail, A     */
+    float   ss;           /* measured steady state value, A   */
+    float   peak;         /* highest measured value, A        */
+    uint8_t valid;        /* results ready                   */
+} app_step_info_t;
+
+/* Run an automatic iq step (needs RUN + CTRL_FOC). The metric is computed
+ * in firmware at 20 kHz, so it does not depend on the waveform rate.
+ * Returns 0 = OK, 2 = not running, 4 = wrong mode, 5 = |I| out of range. */
+uint8_t app_step_start(float amp);
+const app_step_info_t *app_step_info(void);
+const app_foc_info_t *app_foc_info(void);
+
 const app_phase_info_t *app_phase_info(void);
 void                    app_phase_reset(void);
 
