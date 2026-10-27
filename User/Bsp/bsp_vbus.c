@@ -28,8 +28,9 @@ static uint32_t s_errs;
 
 void bsp_vbus_init(void)
 {
-    /* CubeMX does not generate the ADC calibration call; without it the
-     * reading is off by tens of millivolts. ADC2 does the same in bsp_adc. */
+    /* Same pattern as ADC2 in bsp_adc.c: CubeMX only initialises the
+     * peripheral, the calibration is application code. Without it the
+     * reading is off by tens of millivolts. */
     (void)HAL_ADCEx_Calibration_Start(&hadc1, ADC_SINGLE_ENDED);
 
     /* HAL_ADC_Init() only configures the ADC; ADEN stays 0 until a start.

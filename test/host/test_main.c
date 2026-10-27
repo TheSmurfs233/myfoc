@@ -421,12 +421,13 @@ static void test_vofa(void)
     }
     section_end();
 
-    section("vofa: rejects 0 and >16 channels");
+    section("vofa: rejects 0 and above the channel limit");
     tx_clear();
     {
         float ch[20];
         T(vofa_send(ch, 0u) == 0u);
-        T(vofa_send(ch, 17u) == 0u);
+        T(vofa_send(ch, (uint8_t)(VOFA_MAX_CHANNELS + 1u)) == 0u);
+    T(vofa_send(ch, 17u) == 1u);          /* vbus made 17 legal */
         T(vofa_send(NULL, 3u) == 0u);
         T(fake_tx_len() == 0u);
     }

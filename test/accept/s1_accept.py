@@ -297,10 +297,10 @@ def main():
     check("wave: CSV rows captured", len(csv) > 300, "rows=%d" % len(csv))
     check("wave: no stray non-CSV lines in stream", not other, str(other[:3]))
 
-    # every row must have exactly 16 fields: t, duty a/b/c, ia/ib/ic,
-    # enc mech/elec/spd, id, iq, id_ref, iq_ref, vd, vq
-    bad = [x for x in csv if len(x.split(",")) != 16]
-    check("wave: every row has 16 channels", not bad, str(bad[:2]))
+    # every row must have exactly 17 fields: t, duty a/b/c, ia/ib/ic,
+    # enc mech/elec/spd, id, iq, id_ref, iq_ref, vd, vq, vbus
+    bad = [x for x in csv if len(x.split(",")) != 17]
+    check("wave: every row has 17 channels", not bad, str(bad[:2]))
 
     rows = [[float(v) for v in x.split(",")] for x in csv]
     if rows:

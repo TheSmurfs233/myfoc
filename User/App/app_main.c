@@ -1249,6 +1249,7 @@ static void task_wave(uint32_t now)
     ch[13] = s_foc_info.iq_ref;          /* commanded iq, A  */
     ch[14] = s_foc_info.vd;              /* V                */
     ch[15] = s_foc_info.vq;              /* V                */
+    ch[16] = bsp_vbus_volts();           /* DC bus voltage, V */
 
     if (vofa_send(ch, (uint8_t)WAVE_CH) != 0u) {
         s_st.wave_frames++;

@@ -36,7 +36,7 @@ extern "C" {
 
 #include <stdint.h>
 
-#define VOFA_MAX_CHANNELS   16u
+#define VOFA_MAX_CHANNELS   20u
 
 /**
   * @brief  Send one FireWater CSV row (non-blocking, goes into the TX ring).
