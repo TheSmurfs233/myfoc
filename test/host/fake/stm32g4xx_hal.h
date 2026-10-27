@@ -89,7 +89,15 @@ typedef struct {
     volatile uint32_t CR;
     volatile uint32_t CFGR;
     volatile uint32_t JSQR;
+    volatile uint32_t DR;      /* regular data register (S7.5 Vbus) */
 } ADC_TypeDef;
+
+#define ADC_ISR_EOC     (1u << 2)
+#define ADC_CR_ADSTART  (1u << 2)
+#ifndef ADC1
+extern ADC_TypeDef fake_adc1_regs;
+#define ADC1 (&fake_adc1_regs)
+#endif
 
 typedef struct {
     ADC_TypeDef *Instance;

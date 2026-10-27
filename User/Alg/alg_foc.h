@@ -55,6 +55,10 @@ void alg_foc_reset(alg_foc_t *f);
 /* Enable/scale the feedforward. gain 0 disables it completely. */
 void alg_foc_set_ff(alg_foc_t *f, float k_emf, float l_h, float gain);
 
+/* Update the bus voltage used for the modulation and the voltage limit.
+ * Call once per millisecond with the measured value (S7.5). */
+void alg_foc_set_vdc(alg_foc_t *f, float vdc);
+
 /* One 20 kHz control step.
  *   ia/ib/ic : measured phase currents (A)
  *   theta    : electrical angle from the encoder (rad)

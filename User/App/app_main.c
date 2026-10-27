@@ -24,6 +24,7 @@
 #include "alg_foc.h"
 #include "alg_spd.h"
 #include "bsp_adc.h"
+#include "bsp_vbus.h"
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
 #include "bsp_pwm.h"
@@ -215,6 +216,8 @@ void app_init(void)
     alg_foc_set_ff(&s_foc, FOC_K_EMF, FOC_L_H, FOC_FF_GAIN);
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
+
+    bsp_vbus_init();
 
     alg_spd_init(&s_spd, SPD_KP, SPD_KI, FOC_I_MAX_A,
                  SPD_FF_BASE, SPD_FF_SLOPE, SPD_KICK, SPD_KICK_RPM);
@@ -1121,6 +1124,12 @@ static void task_enc_slow(uint32_t now)
 static void task_1ms(uint32_t now)
 {
     uint32_t dt = (uint32_t)(now - s_t_1ms);
+
+    /* S7.5: the bus voltage moves slowly; 1 kHz with a 5 ms filter is
+     * plenty and keeps the control loop free of extra work. */
+    if (bsp_vbus_update() != 0u) {
+        alg_foc_set_vdc(&s_foc, bsp_vbus_volts());
+    }
 
     if (dt >= 1000u) {
         /* s_loop_cnt counts iterations over dt milliseconds.

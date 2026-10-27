@@ -77,6 +77,23 @@ void alg_foc_set_ff(alg_foc_t *f, float k_emf, float l_h, float gain)
     }
 }
 
+void alg_foc_set_vdc(alg_foc_t *f, float vdc)
+{
+    if ((f == 0) || (vdc < 6.0f) || (vdc > 30.0f)) {
+        return;                       /* implausible: keep the last value */
+    }
+
+    f->vdc   = vdc;
+    f->v_lim = 0.5f * vdc * f->m_max;
+
+    /* The PI limits follow the voltage limit, otherwise the integrators
+     * would keep pushing towards a voltage the bridge cannot produce. */
+    f->pi_d.out_max =  f->v_lim;
+    f->pi_d.out_min = -f->v_lim;
+    f->pi_q.out_max =  f->v_lim;
+    f->pi_q.out_min = -f->v_lim;
+}
+
 void alg_clarke(float ia, float ib, float *alpha, float *beta)
 {
     if (alpha != 0) { *alpha = ia; }

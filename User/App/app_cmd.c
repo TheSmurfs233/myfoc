@@ -15,6 +15,7 @@
 #include "bsp_cordic.h"
 #include "bsp_gpio.h"
 #include "bsp_prof.h"
+#include "bsp_vbus.h"
 #include "bsp_pwm.h"
 #include "bsp_ssi.h"
 #include "bsp_uart.h"
@@ -137,6 +138,7 @@ static void print_help(void)
     log_printf(" pi <kp> <ki>   FOC PI gains (runtime), pi def restores");
     log_printf(" step <A>       measure an iq step at 20 kHz, prints the result");
     log_printf(" ff <0..1>      back-EMF + decoupling feedforward gain");
+    log_printf(" vbus           measured DC bus voltage and its status");
     log_printf(" spd <rpm>      speed loop target, spd off releases iq");
     log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
@@ -473,6 +475,17 @@ static void cmd_exec(char *line)
             log_printf("spi = kp %.3f A/rpm, ki %.3f A/(rpm s)",
                        (double)kp, (double)ki);
         }
+    }
+
+    /* ---------------- vbus (S7.5) ----------------- */
+    else if (strcmp(tok[0], "vbus") == 0) {
+        log_printf("vbus = %.2f V (raw %.2f V, code %u), %s",
+                   (double)bsp_vbus_volts(), (double)bsp_vbus_raw_volts(),
+                   (unsigned)bsp_vbus_raw(),
+                   (bsp_vbus_valid() != 0u) ? "ok" : "BAD");
+        log_printf(" filter 1 kHz, %u errors, OV %.2f V, UV %.2f V",
+                   (unsigned)bsp_vbus_errs(), (double)VBUS_OV_V,
+                   (double)VBUS_UV_V);
     }
 
     /* ---------------- ff (S7.2) ----------------- */

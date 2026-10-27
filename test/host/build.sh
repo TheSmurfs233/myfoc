@@ -38,6 +38,7 @@ SRC="$HERE/test_main.c
      $ROOT/User/Bsp/bsp_pwm.c
      $ROOT/User/Bsp/bsp_adc.c
      $ROOT/User/Bsp/bsp_prof.c
+     $ROOT/User/Bsp/bsp_vbus.c
      $ROOT/User/Bsp/bsp_sys.c
      $HERE/fake/bsp_flash_fake.c
      $HERE/fake/bsp_ssi_fake.c

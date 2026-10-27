@@ -33,8 +33,19 @@ TIM_TypeDef         fake_tim1_regs = { .CR1 = 0u, .SR = 0u, .CNT = 0u, .CCER = 0
 /* ADC2 injected-group model + DWT cycle counter model */
 ADC_TypeDef         fake_adc2_regs = { 2048u, 2048u, 2048u, 0u, 0u, 0u, 0u };
 ADC_HandleTypeDef   hadc2          = { &fake_adc2_regs };
+
+/* ADC1 (S7.5 bus voltage). The fake starts with EOC already set and a DR
+ * that corresponds to 12.0 V so the driver sees a plausible reading. */
+ADC_TypeDef         fake_adc1_regs = { 0u, 0u, 0u, ADC_ISR_EOC, 0u, 0u, 0u, 2127u };
+ADC_HandleTypeDef   hadc1          = { &fake_adc1_regs };
 DWT_TypeDef         fake_dwt       = { 0u, 0u };
 CoreDebug_TypeDef   fake_coredebug = { 0u };
+
+HAL_StatusTypeDef HAL_ADC_Start(ADC_HandleTypeDef *hadc)
+{
+    (void)hadc;
+    return HAL_OK;
+}
 
 HAL_StatusTypeDef HAL_ADCEx_Calibration_Start(ADC_HandleTypeDef *hadc, uint32_t SingleDiff)
 {
