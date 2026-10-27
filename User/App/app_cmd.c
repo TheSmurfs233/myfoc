@@ -344,6 +344,9 @@ static void cmd_exec(char *line)
                     log_printf("ERR current too high, |I| <= %.2f A",
                                (double)FOC_I_MAX_A);
                     break;
+                case 6u:
+                    log_printf("ERR speed loop on, spd off first");
+                    break;
                 default:
                     log_printf("ERR calibrating, wait");
                     break;

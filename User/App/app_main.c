@@ -633,6 +633,11 @@ uint8_t app_foc_set(float id, float iq)
     if (mid_current_get()->ready == 0u) {
         return 3u;                       /* zero drift still being measured */
     }
+    if (s_spd.on != 0u) {
+        /* The speed loop rewrites iq_ref every 1 ms, so accepting this would
+         * look like it worked and then do nothing. */
+        return 6u;
+    }
 
     mag = sqrtf((id * id) + (iq * iq));
     if (mag > FOC_I_MAX_A) {
@@ -806,6 +811,7 @@ static void task_foc(uint32_t t_pick)
             bsp_pwm_disable();
             bsp_pwm_set_all_duty(PWM_START_DUTY);
             s_st.state        = APP_ST_FAULT;
+            app_spd_off();
             s_foc_info.faults++;
             s_foc_trip_cnt    = 0u;
             log_printf("ERR overcurrent trip I=%d mA, type stop to reset",
