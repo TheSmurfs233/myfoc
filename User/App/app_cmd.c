@@ -620,9 +620,10 @@ static float   s_pll_zeta = PLL_ZETA;
             else if (strcmp(tok[1], "siq") == 0) { which = 2u; }
             else if (strcmp(tok[1], "uv") == 0) { which = 3u; }
             else if (strcmp(tok[1], "ov") == 0) { which = 4u; }
+            else if (strcmp(tok[1], "oc") == 0) { which = 5u; }
 
             if (!parse_num(tok[2], &v) || (which == 0xFFu)) {
-                log_printf("ERR usage=prot os|st|siq|uv|ov <value>");
+                log_printf("ERR usage=prot os|st|siq|oc|uv|ov <value>");
             } else if (app_prot_set(which, v) != 0u) {
                 log_printf("ERR prot value out of range");
             } else {
@@ -633,7 +634,8 @@ static float   s_pll_zeta = PLL_ZETA;
                        (int)p->overspeed_rpm, (int)p->overspeed_ms,
                        (int)p->stall_rpm, (int)(p->stall_iq_a * 1000.0f),
                        (int)p->stall_ms);
-            log_printf(" uv %.2f V, ov %.2f V, %d ms, grace %d ms",
+            log_printf(" oc %.2f A, uv %.2f V, ov %.2f V, %d ms, grace %d ms",
+                       (double)p->oc_a,
                        (double)p->uv_v, (double)p->ov_v,
                        (int)p->vbus_ms, (int)PROT_GRACE_MS);
         }

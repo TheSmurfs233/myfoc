@@ -211,6 +211,7 @@ typedef enum {
 } app_fault_t;
 
 typedef struct {
+    float    oc_a;          /* over-current trip, A */
     float    overspeed_rpm;
     uint16_t overspeed_ms;
     float    stall_rpm;

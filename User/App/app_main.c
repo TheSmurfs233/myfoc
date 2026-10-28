@@ -256,6 +256,7 @@ void app_init(void)
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
 
+    s_prot.oc_a          = FOC_I_TRIP_A;
     s_prot.overspeed_rpm = PROT_OVERSPEED_RPM;
     s_prot.overspeed_ms  = PROT_OVERSPEED_MS;
     s_prot.stall_rpm     = PROT_STALL_RPM;
@@ -761,6 +762,10 @@ uint8_t app_prot_set(uint8_t which, float value)
              s_prot.uv_v = value; break;
     case 4u: if ((value < 5.0f)    || (value > 24.0f)) { return 1u; }
              s_prot.ov_v = value; break;
+    case 5u: /* the shunt saturates at +-1.32 A, so the trip must stay below
+              * that; the lower bound keeps it above the noise floor. */
+             if ((value < 0.20f) || (value > 1.30f)) { return 1u; }
+             s_prot.oc_a = value; break;
     default: return 1u;
     }
     return 0u;
@@ -1053,7 +1058,7 @@ static void task_foc(uint32_t t_pick)
     t = fabsf(cs->ib); if (t > imax) { imax = t; }
     t = fabsf(cs->ic); if (t > imax) { imax = t; }
 
-    if (imax >= FOC_I_TRIP_A) {
+    if (imax >= s_prot.oc_a) {
         if (++s_foc_trip_cnt >= FOC_TRIP_FRAMES) {
             s_foc_trip_cnt = 0u;
             s_foc_info.faults++;
