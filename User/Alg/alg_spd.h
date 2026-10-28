@@ -38,7 +38,13 @@ typedef struct {
     float    out;         /* iq reference produced last step, A     */
     uint8_t  on;
     uint8_t  kick_on;    /* set by the App for a short start-up window */
+    float    gain_lo_rpm;   /* full gains below this speed            */
+    float    gain_hi_rpm;   /* reduced gains from this speed up       */
+    float    gain_hi_scale; /* gain multiplier at and above hi        */
 } alg_spd_t;
+
+/* Speed dependent gain scaling (see board_cfg). */
+void  alg_spd_set_sched(alg_spd_t *s, float lo_rpm, float hi_rpm, float hi_scale);
 
 void  alg_spd_init(alg_spd_t *s, float kp, float ki, float out_max,
                    float ff_base, float ff_slope, float kick,

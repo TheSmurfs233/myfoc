@@ -32,6 +32,9 @@ void alg_spd_init(alg_spd_t *s, float kp, float ki, float out_max,
     s->ff_slope = (ff_slope > 0.0f) ? ff_slope : 0.0f;
     s->kick     = (kick     > 0.0f) ? kick     : 0.0f;
     s->kick_rpm = (kick_rpm > 0.0f) ? kick_rpm : 30.0f;
+    s->gain_lo_rpm   = 300.0f;
+    s->gain_hi_rpm   = 600.0f;
+    s->gain_hi_scale = 1.0f;     /* no scheduling unless configured */
     s->out_max  = (out_max  > 0.0f) ? out_max  : 1.0f;
 
     alg_spd_reset(s);
@@ -49,6 +52,19 @@ void alg_spd_reset(alg_spd_t *s)
     s->kick_on = 0u;
     s->pi.out_max = s->out_max;
     s->pi.out_min = -s->out_max;
+}
+
+void alg_spd_set_sched(alg_spd_t *s, float lo_rpm, float hi_rpm, float hi_scale)
+{
+    if (s == 0) {
+        return;
+    }
+    s->gain_lo_rpm   = (lo_rpm > 0.0f) ? lo_rpm : 1.0f;
+    s->gain_hi_rpm   = (hi_rpm > s->gain_lo_rpm) ? hi_rpm : (s->gain_lo_rpm + 1.0f);
+    s->gain_hi_scale = (hi_scale >= 0.0f) ? hi_scale : 1.0f;
+    if (s->gain_hi_scale > 1.0f) {
+        s->gain_hi_scale = 1.0f;
+    }
 }
 
 float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
@@ -75,7 +91,34 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
         return 0.0f;
     }
 
-    u = alg_pi_step(&s->pi, ref - spd_rpm, ts);
+    /* Gain scheduling: the 10 ms speed window leaves a ripple at the
+     * electrical frequency (58 Hz at 500 rpm). With the full Kp that ripple
+     * becomes a current ripple and the motor shakes, so scale the gains
+     * down between gain_lo_rpm and gain_hi_rpm. */
+    {
+        float av = (spd_rpm < 0.0f) ? -spd_rpm : spd_rpm;
+        float sc = 1.0f;
+
+        if ((s->gain_hi_scale < 1.0f) && (av > s->gain_lo_rpm)) {
+            float t = (av - s->gain_lo_rpm) / (s->gain_hi_rpm - s->gain_lo_rpm);
+
+            if (t > 1.0f) { t = 1.0f; }
+            sc = 1.0f + t * (s->gain_hi_scale - 1.0f);
+        }
+
+        if (sc < 1.0f) {
+            float kp = s->pi.kp;
+            float ki = s->pi.ki;
+
+            s->pi.kp = kp * sc;
+            s->pi.ki = ki * sc;
+            u = alg_pi_step(&s->pi, ref - spd_rpm, ts);
+            s->pi.kp = kp;
+            s->pi.ki = ki;
+        } else {
+            u = alg_pi_step(&s->pi, ref - spd_rpm, ts);
+        }
+    }
 
     /* Friction feedforward: helps low speed a lot because the 10 ms speed
      * window makes the loop slow to react. */

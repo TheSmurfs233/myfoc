@@ -73,7 +73,12 @@ static uint16_t s_prot_enc_zero_cnt;/* consecutive raw==0 frames        */
 /* S7.3 speed loop. */
 static alg_spd_t s_spd;
 static uint8_t   s_spd_div;
-static uint32_t  s_spd_kick_t0;  /* start of the kick window */
+static uint32_t  s_spd_kick_t0;
+
+/* Ripple diagnostic: min/max of iq and speed over a short window. */
+static app_rip_t  s_rip;
+static uint32_t   s_rip_t0;
+static uint8_t    s_rip_on;  /* start of the kick window */
 static float     s_spd_target;    /* commanded, before the ramp  */
 static float     s_spd_ramp_hz;   /* rpm per second              */
 
@@ -271,6 +276,9 @@ void app_init(void)
     s_spd_ramp_hz = SPD_RAMP_RPM_S;
     alg_spd_init(&s_spd, SPD_KP, SPD_KI, FOC_I_MAX_A,
                  SPD_FF_BASE, SPD_FF_SLOPE, SPD_KICK, SPD_KICK_MS);
+    /* Must come AFTER init: init resets gain_hi_scale to 1.0 (no
+     * scheduling), which silently disabled the feature earlier. */
+    alg_spd_set_sched(&s_spd, SPD_GAIN_LO_RPM, SPD_GAIN_HI_RPM, SPD_GAIN_HI_SCALE);
     s_spd_div = 0u;
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
@@ -870,6 +878,22 @@ void app_spd_get_pi(float *kp, float *ki)
 {
     if (kp != 0) { *kp = s_spd.pi.kp; }
     if (ki != 0) { *ki = s_spd.pi.ki; }
+}
+
+void app_rip_start(void)
+{
+    s_rip.iq_min  =  1e9f;
+    s_rip.iq_max  = -1e9f;
+    s_rip.spd_min =  1e9f;
+    s_rip.spd_max = -1e9f;
+    s_rip.n       = 0u;
+    s_rip_t0      = HAL_GetTick();
+    s_rip_on      = 1u;
+}
+
+const app_rip_t *app_rip_info(void)
+{
+    return &s_rip;
 }
 
 uint8_t app_sstep_start(float rpm)
@@ -1530,6 +1554,22 @@ static void task_1ms(uint32_t now)
 
         if (bsp_vbus_update() != 0u) {
             alg_foc_set_vdc(&s_foc, bsp_vbus_volts());
+        }
+
+        /* Ripple diagnostic, sampled at 1 kHz. */
+        if (s_rip_on != 0u) {
+            if ((uint32_t)(now - s_rip_t0) < (uint32_t)RIP_WINDOW_MS) {
+                float iq = s_foc_info.iq;
+                float sp = s_foc_info.spd_rpm;
+
+                if (iq < s_rip.iq_min)  { s_rip.iq_min  = iq; }
+                if (iq > s_rip.iq_max)  { s_rip.iq_max  = iq; }
+                if (sp < s_rip.spd_min) { s_rip.spd_min = sp; }
+                if (sp > s_rip.spd_max) { s_rip.spd_max = sp; }
+                s_rip.n++;
+            } else {
+                s_rip_on = 0u;      /* done, keep the result */
+            }
         }
 
         prot_check_1ms(now);

@@ -139,6 +139,7 @@ static void print_help(void)
     log_printf(" step <A>       measure an iq step at 20 kHz, prints the result");
     log_printf(" ff <0..1>      back-EMF + decoupling feedforward gain");
     log_printf(" vbus           measured DC bus voltage and its status");
+    log_printf(" rip            peak-to-peak iq and speed over 500 ms");
     log_printf(" fault          last fault and per-type counters");
     log_printf(" prot [os|st|siq|uv|ov <v>]  protection thresholds");
     log_printf(" spd <rpm>      speed loop target, spd off releases iq");
@@ -561,6 +562,27 @@ static void cmd_exec(char *line)
                        (double)p->uv_v, (double)p->ov_v,
                        (int)p->vbus_ms, (int)PROT_GRACE_MS);
         }
+    }
+
+    /* ---------------- rip (S7.3 diag) ------------- */
+    else if (strcmp(tok[0], "rip") == 0) {
+        const app_rip_t *r = app_rip_info();
+
+        /* Print what the previous window collected, then restart it:
+         * starting first would print the -1e9 sentinels. */
+        if (r->n == 0u) {
+            log_printf("rip: collecting, ask again in %d ms", (int)RIP_WINDOW_MS);
+        } else {
+            /* The mini printf has no "+" flag: a literal %+.2f came out as
+             * text on hardware. Use plain %.2f and let the sign show. */
+            log_printf("rip %d ms: iq %.2f to %.2f A (%.2f p-p)",
+                       (int)RIP_WINDOW_MS, (double)r->iq_min, (double)r->iq_max,
+                       (double)(r->iq_max - r->iq_min));
+            log_printf(" spd %d~%d rpm (%d p-p), %u samples",
+                       (int)r->spd_min, (int)r->spd_max,
+                       (int)(r->spd_max - r->spd_min), (unsigned)r->n);
+        }
+        app_rip_start();
     }
 
     /* ---------------- vbus (S7.5) ----------------- */

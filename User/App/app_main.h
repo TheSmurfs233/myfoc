@@ -227,6 +227,16 @@ typedef struct {
 void app_fault_raise(uint8_t code, float value);
 const app_fault_info_t *app_fault_info(void);
 const app_prot_t       *app_prot_info(void);
+
+typedef struct {
+    float iq_min, iq_max;     /* measured iq over the window, A   */
+    float spd_min, spd_max;   /* measured speed, rpm              */
+    uint16_t n;               /* samples collected                */
+} app_rip_t;
+
+/* Start (or restart) a ripple measurement. */
+void app_rip_start(void);
+const app_rip_t *app_rip_info(void);
 uint8_t app_prot_set(uint8_t which, float value);
 
 const app_foc_info_t *app_foc_info(void);

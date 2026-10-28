@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             108u
+#define FW_BUILD_ID             113u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -347,6 +347,14 @@ extern "C" {
  * accelerates at ~2900 rpm/s and overshoots before the 10 ms speed window
  * can react (measured: a visible lurch at every start). */
 #define SPD_RAMP_RPM_S          600.0f
+/* Gain scheduling. At high speed the 10 ms speed window leaves a ripple at
+ * the electrical frequency (58 Hz at 500 rpm) and a high Kp turns it into
+ * a current ripple (measured 0.69 A with kp 0.016 vs 0.07 A with 0.004).
+ * Scale the gains down linearly between these speeds. */
+#define SPD_GAIN_LO_RPM         300.0f   /* full gains below this      */
+#define SPD_GAIN_HI_RPM         600.0f   /* scale settles here         */
+#define SPD_GAIN_HI_SCALE       0.20f    /* 20% of kp/ki above HI      */
+#define RIP_WINDOW_MS           500u    /* ripple measurement window */
 #define SPD_RPM_MAX             2000.0f   /* target limit                */
 /* sstep: settle first, then step the speed reference and record. */
 #define SSTEP_SETTLE_MS         300u
