@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             92u
+#define FW_BUILD_ID             96u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -146,6 +146,20 @@ extern "C" {
 #define VBUS_V_PER_LSB          ((ADC_VREF / ADC_FULL_SCALE) * VBUS_DIV_RATIO)  /* 5.64mV */
 
 #define VBUS_NOMINAL_V          12.0f
+/* S7.6 protections (runtime adjustable with the "prot" command). */
+#define PROT_OVERSPEED_RPM      2000.0f
+#define PROT_OVERSPEED_MS       100u
+#define PROT_STALL_RPM          30.0f
+#define PROT_STALL_IQ_A         0.6f
+#define PROT_STALL_MS           500u
+#define PROT_VBUS_MS            50u
+#define PROT_ENC_FRAMES         20u
+/* A disconnected sensor reads raw 0 forever (the all-zero CRC also passes),
+ * so a long run of exactly zero is treated as a dead encoder: 200 frames
+ * at 20 kHz is 10 ms, far longer than a real 0-degree reading would last. */
+#define PROT_ENC_ZERO_FRAMES    200u
+#define PROT_GRACE_MS           200u    /* ignore speed/Vbus after start */
+
 #define VBUS_OV_V               13.8f           /* 1.15 x nominal */
 #define VBUS_UV_V               9.0f            /* 0.75 x nominal */
 #define VBUS_MAX_MEASURABLE_V   (ADC_VREF * VBUS_DIV_RATIO)   /* 23.1V */

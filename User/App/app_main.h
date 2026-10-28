@@ -175,6 +175,42 @@ void    app_spd_get_pi(float *kp, float *ki);
 
 uint8_t app_step_start(float amp);
 const app_step_info_t *app_step_info(void);
+/* ---------------- protections (S7.6) ---------------- */
+typedef enum {
+    APP_FAULT_NONE = 0,
+    APP_FAULT_OVERCURRENT = 1,
+    APP_FAULT_OVERSPEED  = 2,
+    APP_FAULT_STALL      = 3,
+    APP_FAULT_UNDERVOLT  = 4,
+    APP_FAULT_OVERVOLT   = 5,
+    APP_FAULT_ENCODER    = 6,
+    APP_FAULT_COUNT      = 7
+} app_fault_t;
+
+typedef struct {
+    float    overspeed_rpm;
+    uint16_t overspeed_ms;
+    float    stall_rpm;
+    float    stall_iq_a;
+    uint16_t stall_ms;
+    float    uv_v;
+    float    ov_v;
+    uint16_t vbus_ms;
+} app_prot_t;
+
+typedef struct {
+    uint8_t  code;        /* last fault, APP_FAULT_NONE when clean   */
+    float    value;       /* the measurement that tripped it         */
+    uint32_t uptime_ms;   /* when it happened                        */
+    uint16_t count[APP_FAULT_COUNT];
+} app_fault_info_t;
+
+/* Raise a fault: bridge off, speed loop released, references cleared. */
+void app_fault_raise(uint8_t code, float value);
+const app_fault_info_t *app_fault_info(void);
+const app_prot_t       *app_prot_info(void);
+uint8_t app_prot_set(uint8_t which, float value);
+
 const app_foc_info_t *app_foc_info(void);
 
 const app_phase_info_t *app_phase_info(void);

@@ -57,6 +57,18 @@ static alg_foc_t      s_foc;
 static app_foc_info_t s_foc_info;
 static uint8_t        s_foc_trip_cnt;
 
+/* S7.6 protections. */
+static app_prot_t       s_prot;
+static app_fault_info_t s_fault;
+static uint32_t s_prot_start_ms;   /* start of the grace window        */
+static uint32_t s_prot_ov_ms;      /* overspeed debounce               */
+static uint32_t s_prot_stall_ms;   /* stall debounce                   */
+static uint32_t s_prot_uv_ms;      /* under-voltage debounce           */
+static uint32_t s_prot_ovv_ms;     /* over-voltage debounce            */
+static uint16_t s_prot_enc_cnt;    /* consecutive bad encoder frames   */
+static uint32_t s_prot_bad_seen;   /* last encoder good-frame counter  */
+static uint16_t s_prot_enc_zero_cnt;/* consecutive raw==0 frames        */
+
 /* S7.3 speed loop. */
 static alg_spd_t s_spd;
 static uint8_t   s_spd_div;
@@ -216,6 +228,21 @@ void app_init(void)
     alg_foc_set_ff(&s_foc, FOC_K_EMF, FOC_L_H, FOC_FF_GAIN);
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
+
+    s_prot.overspeed_rpm = PROT_OVERSPEED_RPM;
+    s_prot.overspeed_ms  = PROT_OVERSPEED_MS;
+    s_prot.stall_rpm     = PROT_STALL_RPM;
+    s_prot.stall_iq_a    = PROT_STALL_IQ_A;
+    s_prot.stall_ms      = PROT_STALL_MS;
+    s_prot.uv_v          = VBUS_UV_V;
+    s_prot.ov_v          = VBUS_OV_V;
+    s_prot.vbus_ms       = PROT_VBUS_MS;
+
+    s_fault.code      = (uint8_t)APP_FAULT_NONE;
+    s_fault.value     = 0.0f;
+    s_fault.uptime_ms = 0u;
+    { uint8_t i; for (i = 0u; i < (uint8_t)APP_FAULT_COUNT; i++) {
+        s_fault.count[i] = 0u; } }
 
     bsp_vbus_init();
 
@@ -536,6 +563,12 @@ uint8_t app_start(void)
      * 256 calibration frames take 12.8ms and complete in the background. */
     bsp_pwm_set_all_duty(PWM_START_DUTY);
     bsp_pwm_enable();                    /* preload duty, CCxE, then MOE */
+
+    /* S7.6: protections ignore the first milliseconds. */
+    s_prot_start_ms = HAL_GetTick();
+    s_prot_enc_cnt  = 0u;
+    s_prot_enc_zero_cnt = 0u;
+    s_prot_bad_seen = mid_enc_info()->frames;
     if (mid_current_get()->ready == 0u) {
         mid_current_restart_cal();
     }
@@ -549,6 +582,9 @@ uint8_t app_stop(void)
     alg_foc_reset(&s_foc);
     app_spd_off();
     s_step_phase       = 0u;             /* cancel any running step */
+    /* Acknowledge the latched fault, keep the per-type counters. */
+    s_fault.code       = (uint8_t)APP_FAULT_NONE;
+    s_fault.value      = 0.0f;
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
     s_foc_info.ready   = 0u;
@@ -623,6 +659,79 @@ uint8_t app_vf_off(void)
 /* ------------------------------------------------------------------ */
 /* FOC current loop control (S6)                                       */
 /* ------------------------------------------------------------------ */
+void app_fault_raise(uint8_t code, float value)
+{
+    /* Verify the bridge really goes quiet before anything else. */
+    bsp_pwm_disable();
+    bsp_pwm_set_all_duty(PWM_START_DUTY);
+
+    app_spd_off();
+    s_foc_info.id_ref  = 0.0f;
+    s_foc_info.iq_ref  = 0.0f;
+    s_step_phase       = 0u;
+    alg_foc_reset(&s_foc);
+
+    s_fault.code      = code;
+    s_fault.value     = value;
+    s_fault.uptime_ms = HAL_GetTick();
+    if (code < (uint8_t)APP_FAULT_COUNT) {
+        s_fault.count[code]++;
+    }
+
+    s_st.state = APP_ST_FAULT;
+
+    switch (code) {
+    case (uint8_t)APP_FAULT_OVERCURRENT:
+        log_printf("ERR fault overcurrent I=%d mA", (int)(value * 1000.0f));
+        break;
+    case (uint8_t)APP_FAULT_OVERSPEED:
+        log_printf("ERR fault overspeed %d rpm", (int)value);
+        break;
+    case (uint8_t)APP_FAULT_STALL:
+        log_printf("ERR fault stall, iq %d mA at %d rpm",
+                   (int)(value * 1000.0f), (int)mid_enc_info()->spd_rpm);
+        break;
+    case (uint8_t)APP_FAULT_UNDERVOLT:
+        log_printf("ERR fault undervoltage %d mV", (int)(value * 1000.0f));
+        break;
+    case (uint8_t)APP_FAULT_OVERVOLT:
+        log_printf("ERR fault overvoltage %d mV", (int)(value * 1000.0f));
+        break;
+    default:
+        log_printf("ERR fault encoder invalid");
+        break;
+    }
+    log_printf(" type stop to reset");
+}
+
+const app_fault_info_t *app_fault_info(void)
+{
+    return &s_fault;
+}
+
+const app_prot_t *app_prot_info(void)
+{
+    return &s_prot;
+}
+
+uint8_t app_prot_set(uint8_t which, float value)
+{
+    switch (which) {
+    case 0u: if ((value < 100.0f)  || (value > 6000.0f)) { return 1u; }
+             s_prot.overspeed_rpm = value; break;
+    case 1u: if ((value < 1.0f)    || (value > 1000.0f)) { return 1u; }
+             s_prot.stall_rpm = value; break;
+    case 2u: if ((value < 0.05f)   || (value > 1.2f)) { return 1u; }
+             s_prot.stall_iq_a = value; break;
+    case 3u: if ((value < 5.0f)    || (value > 20.0f)) { return 1u; }
+             s_prot.uv_v = value; break;
+    case 4u: if ((value < 5.0f)    || (value > 24.0f)) { return 1u; }
+             s_prot.ov_v = value; break;
+    default: return 1u;
+    }
+    return 0u;
+}
+
 uint8_t app_foc_set(float id, float iq)
 {
     float mag;
@@ -804,6 +913,41 @@ static void task_foc(uint32_t t_pick)
         return;
     }
 
+    /* ---- encoder liveness: count frames without a NEW good one.
+     * Using the bad-frame counter was wrong: while the encoder is healthy
+     * that counter never changes, so the "stuck" timer fired 20 frames
+     * after start (measured: false encoder fault at 1 ms). ---- */
+    {
+        if (e->frames != s_prot_bad_seen) {
+            s_prot_bad_seen = e->frames;
+            s_prot_enc_cnt  = 0u;
+        } else if (s_prot_enc_cnt < 0xFFFFu) {
+            s_prot_enc_cnt++;
+            if (s_prot_enc_cnt >= PROT_ENC_FRAMES) {
+                app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
+                return;
+            }
+        }
+
+        /* A disconnected MT6701 drives MISO to a constant level, so every
+         * bit reads 0 and the CRC of an all-zero frame is itself zero: the
+         * CRC check passes and the angle looks like a valid 0. Measured on
+         * hardware with the cable unplugged: raw 0, crc ok, no fault.
+         * A real sensor sitting exactly at raw 0 for PROT_ENC_ZERO_FRAMES
+         * frames in a row is far less likely than a dead bus. */
+        if (e->raw == 0u) {
+            if (s_prot_enc_zero_cnt < 0xFFFFu) {
+                s_prot_enc_zero_cnt++;
+            }
+            if (s_prot_enc_zero_cnt >= (uint16_t)PROT_ENC_ZERO_FRAMES) {
+                app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
+                return;
+            }
+        } else {
+            s_prot_enc_zero_cnt = 0u;
+        }
+    }
+
     /* ---- current guard (S7 will replace this with a hardware trip) ---- */
     imax = fabsf(cs->ia);
     t = fabsf(cs->ib); if (t > imax) { imax = t; }
@@ -811,14 +955,9 @@ static void task_foc(uint32_t t_pick)
 
     if (imax >= FOC_I_TRIP_A) {
         if (++s_foc_trip_cnt >= FOC_TRIP_FRAMES) {
-            bsp_pwm_disable();
-            bsp_pwm_set_all_duty(PWM_START_DUTY);
-            s_st.state        = APP_ST_FAULT;
-            app_spd_off();
+            s_foc_trip_cnt = 0u;
             s_foc_info.faults++;
-            s_foc_trip_cnt    = 0u;
-            log_printf("ERR overcurrent trip I=%d mA, type stop to reset",
-                       (int)(imax * 1000.0f));
+            app_fault_raise((uint8_t)APP_FAULT_OVERCURRENT, imax);
             return;
         }
     } else {
@@ -1121,6 +1260,87 @@ static void task_enc_slow(uint32_t now)
 /* ------------------------------------------------------------------ */
 /* 1ms task: uptime and loop rate statistics                           */
 /* ------------------------------------------------------------------ */
+/* S7.6: speed and bus-voltage protections, evaluated once per millisecond. */
+static void prot_check_1ms(uint32_t now)
+{
+    const mid_enc_t *e = mid_enc_info();
+    float spd;
+    float vbus;
+
+    if (s_st.state != APP_ST_RUN) {
+        s_prot_ov_ms = 0u;
+        s_prot_stall_ms = 0u;
+        s_prot_uv_ms = 0u;
+        s_prot_ovv_ms = 0u;
+        return;
+    }
+
+    /* Grace window: the first milliseconds after start are not representative
+     * (the bus sags while the gate drivers come up, the speed estimate is
+     * still empty). */
+    if ((uint32_t)(now - s_prot_start_ms) < (uint32_t)PROT_GRACE_MS) {
+        s_prot_ov_ms = 0u;
+        s_prot_stall_ms = 0u;
+        s_prot_uv_ms = 0u;
+        s_prot_ovv_ms = 0u;
+        return;
+    }
+
+    spd  = e->spd_rpm;
+    vbus = bsp_vbus_volts();
+
+    /* ---- over-speed: any mode ---- */
+    if ((spd > s_prot.overspeed_rpm) || (spd < -s_prot.overspeed_rpm)) {
+        if (s_prot_ov_ms == 0u) {
+            s_prot_ov_ms = now;
+        } else if ((uint32_t)(now - s_prot_ov_ms) >= (uint32_t)s_prot.overspeed_ms) {
+            app_fault_raise((uint8_t)APP_FAULT_OVERSPEED, spd);
+            return;
+        }
+    } else {
+        s_prot_ov_ms = 0u;
+    }
+
+    /* ---- stall: only meaningful while the speed loop owns the torque. In
+     * torque mode holding the shaft still is a legitimate experiment. ---- */
+    if ((s_spd.on != 0u) &&
+        (spd < s_prot.stall_rpm) && (spd > -s_prot.stall_rpm) &&
+        ((s_foc_info.iq_ref > s_prot.stall_iq_a) ||
+         (s_foc_info.iq_ref < -s_prot.stall_iq_a))) {
+        if (s_prot_stall_ms == 0u) {
+            s_prot_stall_ms = now;
+        } else if ((uint32_t)(now - s_prot_stall_ms) >= (uint32_t)s_prot.stall_ms) {
+            app_fault_raise((uint8_t)APP_FAULT_STALL, s_foc_info.iq_ref);
+            return;
+        }
+    } else {
+        s_prot_stall_ms = 0u;
+    }
+
+    /* ---- bus voltage ---- */
+    if (vbus < s_prot.uv_v) {
+        if (s_prot_uv_ms == 0u) {
+            s_prot_uv_ms = now;
+        } else if ((uint32_t)(now - s_prot_uv_ms) >= (uint32_t)s_prot.vbus_ms) {
+            app_fault_raise((uint8_t)APP_FAULT_UNDERVOLT, vbus);
+            return;
+        }
+    } else {
+        s_prot_uv_ms = 0u;
+    }
+
+    if (vbus > s_prot.ov_v) {
+        if (s_prot_ovv_ms == 0u) {
+            s_prot_ovv_ms = now;
+        } else if ((uint32_t)(now - s_prot_ovv_ms) >= (uint32_t)s_prot.vbus_ms) {
+            app_fault_raise((uint8_t)APP_FAULT_OVERVOLT, vbus);
+            return;
+        }
+    } else {
+        s_prot_ovv_ms = 0u;
+    }
+}
+
 static void task_1ms(uint32_t now)
 {
     uint32_t dt = (uint32_t)(now - s_t_1ms);
@@ -1130,6 +1350,8 @@ static void task_1ms(uint32_t now)
     if (bsp_vbus_update() != 0u) {
         alg_foc_set_vdc(&s_foc, bsp_vbus_volts());
     }
+
+    prot_check_1ms(now);
 
     if (dt >= 1000u) {
         /* s_loop_cnt counts iterations over dt milliseconds.

@@ -2185,6 +2185,62 @@ static void test_cmd(void)
     }
     section_end();
 
+    section("cmd: prot and fault report the protection state");
+    {
+        tx_clear();
+        cmd_feed("prot\r\n");
+        T(tx_contains("prot os"));
+
+        tx_clear();
+        cmd_feed("prot os 800\r\n");
+        T(tx_contains("OK prot os = 800.00"));
+        T(fabsf(app_prot_info()->overspeed_rpm - 800.0f) < 0.01f);
+
+        tx_clear();
+        cmd_feed("prot os 99999\r\n");
+        T(tx_contains("ERR prot value out of range"));
+
+        tx_clear();
+        cmd_feed("prot zz 5\r\n");
+        T(tx_contains("ERR usage=prot"));
+
+        /* restore the default so later tests are unaffected */
+        cmd_feed("prot os 2000\r\n");
+
+        tx_clear();
+        cmd_feed("fault\r\n");
+        T(tx_contains("fault none"));
+    }
+    section_end();
+
+    section("app: a fault shuts the bridge down and can be cleared");
+    {
+        uint8_t i;
+
+        cmd_feed("mode 2\r\n");
+        cmd_feed("start\r\n");
+        T(app_status()->state == APP_ST_RUN);
+
+        app_fault_raise((uint8_t)APP_FAULT_OVERSPEED, 2100.0f);
+        T(app_status()->state == APP_ST_FAULT);
+        T(bsp_pwm_is_enabled() == 0u);
+        T(app_fault_info()->code == (uint8_t)APP_FAULT_OVERSPEED);
+        T(fabsf(app_fault_info()->value - 2100.0f) < 0.5f);
+        T(app_fault_info()->count[APP_FAULT_OVERSPEED] >= 1u);
+
+        /* start is refused while the fault is latched */
+        T(app_start() == 1u);
+
+        /* stop clears it */
+        cmd_feed("stop\r\n");
+        T(app_status()->state == APP_ST_IDLE);
+        T(app_start() == 0u);
+        cmd_feed("stop\r\n");
+        cmd_feed("mode 0\r\n");
+        for (i = 0u; i < 1u; i++) { }
+    }
+    section_end();
+
     section("cmd: unknown command");
     tx_clear();
     cmd_feed("foobar\r\n");

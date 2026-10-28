@@ -139,6 +139,8 @@ static void print_help(void)
     log_printf(" step <A>       measure an iq step at 20 kHz, prints the result");
     log_printf(" ff <0..1>      back-EMF + decoupling feedforward gain");
     log_printf(" vbus           measured DC bus voltage and its status");
+    log_printf(" fault          last fault and per-type counters");
+    log_printf(" prot [os|st|siq|uv|ov <v>]  protection thresholds");
     log_printf(" spd <rpm>      speed loop target, spd off releases iq");
     log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
@@ -474,6 +476,60 @@ static void cmd_exec(char *line)
         } else {
             log_printf("spi = kp %.3f A/rpm, ki %.3f A/(rpm s)",
                        (double)kp, (double)ki);
+        }
+    }
+
+    /* ---------------- fault (S7.6) ----------------- */
+    else if (strcmp(tok[0], "fault") == 0) {
+        const app_fault_info_t *f = app_fault_info();
+        static const char *name[7] = {
+            "none", "overcurrent", "overspeed", "stall",
+            "undervoltage", "overvoltage", "encoder"
+        };
+        uint8_t i;
+
+        if (f->code == 0u) {
+            log_printf("fault none, all protections idle");
+        } else {
+            log_printf("fault %s, value %.3f, at %u ms",
+                       name[(f->code < 7u) ? f->code : 0u],
+                       (double)f->value, (unsigned)f->uptime_ms);
+        }
+        log_printf(" counts oc %u os %u st %u uv %u ov %u enc %u",
+                   (unsigned)f->count[1], (unsigned)f->count[2],
+                   (unsigned)f->count[3], (unsigned)f->count[4],
+                   (unsigned)f->count[5], (unsigned)f->count[6]);
+        (void)i;
+    }
+    /* ---------------- prot (S7.6) ----------------- */
+    else if (strcmp(tok[0], "prot") == 0) {
+        const app_prot_t *p = app_prot_info();
+
+        if (n == 3u) {
+            float v;
+            uint8_t which = 0xFFu;
+
+            if      (strcmp(tok[1], "os") == 0) { which = 0u; }
+            else if (strcmp(tok[1], "st") == 0) { which = 1u; }
+            else if (strcmp(tok[1], "siq") == 0) { which = 2u; }
+            else if (strcmp(tok[1], "uv") == 0) { which = 3u; }
+            else if (strcmp(tok[1], "ov") == 0) { which = 4u; }
+
+            if (!parse_num(tok[2], &v) || (which == 0xFFu)) {
+                log_printf("ERR usage=prot os|st|siq|uv|ov <value>");
+            } else if (app_prot_set(which, v) != 0u) {
+                log_printf("ERR prot value out of range");
+            } else {
+                log_printf("OK prot %s = %.2f", tok[1], (double)v);
+            }
+        } else {
+            log_printf("prot os %d rpm/%d ms, stall %d rpm %d mA/%d ms",
+                       (int)p->overspeed_rpm, (int)p->overspeed_ms,
+                       (int)p->stall_rpm, (int)(p->stall_iq_a * 1000.0f),
+                       (int)p->stall_ms);
+            log_printf(" uv %.2f V, ov %.2f V, %d ms, grace %d ms",
+                       (double)p->uv_v, (double)p->ov_v,
+                       (int)p->vbus_ms, (int)PROT_GRACE_MS);
         }
     }
 
