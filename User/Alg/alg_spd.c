@@ -35,6 +35,11 @@ void alg_spd_init(alg_spd_t *s, float kp, float ki, float out_max,
     s->gain_lo_rpm   = 300.0f;
     s->gain_hi_rpm   = 600.0f;
     s->gain_hi_scale = 1.0f;     /* no scheduling unless configured */
+    s->lpf_lo_rpm    = 60.0f;
+    s->lpf_hi_rpm    = 180.0f;
+    s->lpf_lo_k      = 1.0f;
+    s->lpf_hi_k      = 1.0f;
+    s->spd_f         = 0.0f;
     s->out_max  = (out_max  > 0.0f) ? out_max  : 1.0f;
 
     alg_spd_reset(s);
@@ -67,6 +72,18 @@ void alg_spd_set_sched(alg_spd_t *s, float lo_rpm, float hi_rpm, float hi_scale)
     }
 }
 
+void alg_spd_set_lpf(alg_spd_t *s, float lo_rpm, float hi_rpm,
+                     float lo_k, float hi_k)
+{
+    if (s == 0) {
+        return;
+    }
+    s->lpf_lo_rpm = (lo_rpm > 0.0f) ? lo_rpm : 1.0f;
+    s->lpf_hi_rpm = (hi_rpm > s->lpf_lo_rpm) ? hi_rpm : (s->lpf_lo_rpm + 1.0f);
+    s->lpf_lo_k = (lo_k > 1.0f) ? 1.0f : ((lo_k < 0.01f) ? 0.01f : lo_k);
+    s->lpf_hi_k = (hi_k > 1.0f) ? 1.0f : ((hi_k < 0.01f) ? 0.01f : hi_k);
+}
+
 float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
 {
     float u;
@@ -91,19 +108,39 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
         return 0.0f;
     }
 
-    /* Gain scheduling: the 10 ms speed window leaves a ripple at the
-     * electrical frequency (58 Hz at 500 rpm). With the full Kp that ripple
-     * becomes a current ripple and the motor shakes, so scale the gains
-     * down between gain_lo_rpm and gain_hi_rpm. */
+    /* Gain scheduling + feedback filter, both speed dependent. The 10 ms
+     * speed window gives a staircase of 7-10 rpm at 300 rpm; the loop would
+     * chase it and turn cogging into current ripple, so at high speed the
+     * feedback is low-pass filtered and the gains are reduced. */
     {
         float av = (spd_rpm < 0.0f) ? -spd_rpm : spd_rpm;
         float sc = 1.0f;
+        float kf = s->lpf_lo_k;
+        float t  = 0.0f;
 
-        if ((s->gain_hi_scale < 1.0f) && (av > s->gain_lo_rpm)) {
-            float t = (av - s->gain_lo_rpm) / (s->gain_hi_rpm - s->gain_lo_rpm);
-
+        if (av > s->gain_lo_rpm) {
+            t = (av - s->gain_lo_rpm) / (s->gain_hi_rpm - s->gain_lo_rpm);
             if (t > 1.0f) { t = 1.0f; }
+        }
+
+        if ((s->gain_hi_scale < 1.0f) && (t > 0.0f)) {
             sc = 1.0f + t * (s->gain_hi_scale - 1.0f);
+        }
+        if (s->lpf_hi_k < 1.0f) {
+            float tf = 0.0f;
+
+            if (av > s->lpf_lo_rpm) {
+                tf = (av - s->lpf_lo_rpm) / (s->lpf_hi_rpm - s->lpf_lo_rpm);
+                if (tf > 1.0f) { tf = 1.0f; }
+            }
+            kf = s->lpf_lo_k + tf * (s->lpf_hi_k - s->lpf_lo_k);
+        }
+
+        /* First order filter on the feedback (no-op when kf == 1). */
+        if (kf < 1.0f) {
+            s->spd_f += kf * (spd_rpm - s->spd_f);
+        } else {
+            s->spd_f = spd_rpm;
         }
 
         if (sc < 1.0f) {
@@ -112,14 +149,13 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
 
             s->pi.kp = kp * sc;
             s->pi.ki = ki * sc;
-            u = alg_pi_step(&s->pi, ref - spd_rpm, ts);
+            u = alg_pi_step(&s->pi, ref - s->spd_f, ts);
             s->pi.kp = kp;
             s->pi.ki = ki;
         } else {
-            u = alg_pi_step(&s->pi, ref - spd_rpm, ts);
+            u = alg_pi_step(&s->pi, ref - s->spd_f, ts);
         }
     }
-
     /* Friction feedforward: helps low speed a lot because the 10 ms speed
      * window makes the loop slow to react. */
     ff = s->ff_base + (s->ff_slope * ((ref > 0.0f) ? ref : -ref));

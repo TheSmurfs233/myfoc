@@ -41,10 +41,17 @@ typedef struct {
     float    gain_lo_rpm;   /* full gains below this speed            */
     float    gain_hi_rpm;   /* reduced gains from this speed up       */
     float    gain_hi_scale; /* gain multiplier at and above hi        */
+    float    lpf_lo_rpm;    /* filter band start                       */
+    float    lpf_hi_rpm;    /* filter band end                         */
+    float    lpf_lo_k;      /* feedback filter coefficient below LO    */
+    float    lpf_hi_k;      /* feedback filter coefficient above HI    */
+    float    spd_f;         /* filtered feedback, rpm                  */
 } alg_spd_t;
 
 /* Speed dependent gain scaling (see board_cfg). */
 void  alg_spd_set_sched(alg_spd_t *s, float lo_rpm, float hi_rpm, float hi_scale);
+/* Speed dependent feedback filter (1.0 = off). */
+void  alg_spd_set_lpf(alg_spd_t *s, float lo_rpm, float hi_rpm, float lo_k, float hi_k);
 
 void  alg_spd_init(alg_spd_t *s, float kp, float ki, float out_max,
                    float ff_base, float ff_slope, float kick,

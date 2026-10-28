@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             113u
+#define FW_BUILD_ID             118u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -333,8 +333,8 @@ extern "C" {
 #define SPD_FREQ_HZ             1000u
 #define SPD_DIV                 (FOC_FREQ_HZ / SPD_FREQ_HZ)
 #define SPD_TS_S                (1.0f / (float)SPD_FREQ_HZ)
-#define SPD_KP                  0.016f    /* A per rpm, measured best with sstep */
-#define SPD_KI                  0.100f    /* A per (rpm*s)                */
+#define SPD_KP                  0.006f    /* A per rpm, measured best with sstep */
+#define SPD_KI                  0.080f    /* A per (rpm*s)                */
 #define SPD_FF_BASE             0.04f     /* friction feedforward, A     */
 #define SPD_FF_SLOPE            0.0f      /* A per rpm (not measurable)  */
 #define SPD_KICK                0.20f     /* breakaway current, A        */
@@ -351,9 +351,19 @@ extern "C" {
  * the electrical frequency (58 Hz at 500 rpm) and a high Kp turns it into
  * a current ripple (measured 0.69 A with kp 0.016 vs 0.07 A with 0.004).
  * Scale the gains down linearly between these speeds. */
-#define SPD_GAIN_LO_RPM         300.0f   /* full gains below this      */
-#define SPD_GAIN_HI_RPM         600.0f   /* scale settles here         */
-#define SPD_GAIN_HI_SCALE       0.20f    /* 20% of kp/ki above HI      */
+#define SPD_GAIN_LO_RPM         150.0f   /* full gains below this      */
+#define SPD_GAIN_HI_RPM         400.0f   /* scale settles here         */
+#define SPD_GAIN_HI_SCALE       1.00f    /* 20% of kp/ki above HI      */
+/* Feedback filter, also speed scheduled. The 10 ms speed window yields a
+ * staircase (measured: 7-10 rpm steps at 300 rpm) and the loop chases it,
+ * which turns cogging into current ripple. 1.0 = no filtering. At 1 kHz a
+ * coefficient of 0.05 is a ~20 ms time constant (~8 Hz). */
+/* The filter band is separate from the gain band: cogging ripple is already
+ * visible from ~200 rpm, well before the gains need to come down. */
+#define SPD_LPF_LO_RPM          60.0f
+#define SPD_LPF_HI_RPM          180.0f
+#define SPD_LPF_LO_K            0.30f    /* no filter below LO         */
+#define SPD_LPF_HI_K            0.10f    /* ~8 Hz above HI             */
 #define RIP_WINDOW_MS           500u    /* ripple measurement window */
 #define SPD_RPM_MAX             2000.0f   /* target limit                */
 /* sstep: settle first, then step the speed reference and record. */
