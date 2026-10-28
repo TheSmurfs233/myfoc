@@ -46,6 +46,7 @@ void alg_spd_reset(alg_spd_t *s)
     s->spd_ref = 0.0f;
     s->out     = 0.0f;
     s->on      = 0u;
+    s->kick_on = 0u;
     s->pi.out_max = s->out_max;
     s->pi.out_min = -s->out_max;
 }
@@ -81,10 +82,15 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
     ff = s->ff_base + (s->ff_slope * ((ref > 0.0f) ? ref : -ref));
     u += (ref > 0.0f) ? ff : -ff;
 
-    /* Start-up kick: only while the rotor is still (nearly) stopped. Applying
-     * it at every speed would keep commanding 0.15 A and the motor would run
-     * away instead of settling on the reference. */
-    if ((spd_rpm < s->kick_rpm) && (spd_rpm > -s->kick_rpm)) {
+    /* Start-up kick. It is deliberately NOT gated by the measured speed any
+     * more: with a target near the old gate (50 rpm) the condition toggled
+     * every loop, producing a rattle of kick-on / overshoot / kick-off /
+     * undershoot. The App enables the kick for a short window after a target
+     * change; a rotor that never moves is caught by the stall protection. */
+    /* The kick must release as soon as the rotor moves: holding 0.20 A for
+     * the whole window accelerates at ~690 rpm/s, which for a 30 rpm target
+     * gave a 128 rpm peak (measured). So: kick window AND still not moving. */
+    if ((s->kick_on != 0u) && (spd_rpm < 10.0f) && (spd_rpm > -10.0f)) {
         if (ref > 0.0f) {
             if (u <  s->kick) { u =  s->kick; }
         } else {

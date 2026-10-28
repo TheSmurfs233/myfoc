@@ -134,7 +134,8 @@ typedef struct {
     float vq;
     float m;          /* modulation index used                */
     uint32_t faults;  /* frames aborted by the current guard  */
-    float    spd_ref; /* speed reference, rpm (0 = speed loop off) */
+    float    spd_ref; /* ramped speed reference, rpm              */
+    float    spd_target; /* commanded target, rpm                 */
     float    spd_rpm; /* measured speed used by the speed loop     */
     uint8_t  ready;   /* at least one FOC step has run        */
 } app_foc_info_t;

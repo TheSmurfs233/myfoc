@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             102u
+#define FW_BUILD_ID             108u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -338,7 +338,15 @@ extern "C" {
 #define SPD_FF_BASE             0.04f     /* friction feedforward, A     */
 #define SPD_FF_SLOPE            0.0f      /* A per rpm (not measurable)  */
 #define SPD_KICK                0.20f     /* breakaway current, A        */
-#define SPD_KICK_RPM            50.0f     /* kick only below this speed  */
+/* Kick window: enabled for this long after a target change, so a target that
+ * sits near a speed threshold cannot toggle it every loop (measured: spd 50
+ * rattled because the gate was at exactly 50 rpm). */
+#define SPD_KICK_MS             250u
+/* Acceleration limit for the speed reference. Without it a step command
+ * makes the PI output Kp*error (0.016*50 = 0.8 A for "spd 50"), which
+ * accelerates at ~2900 rpm/s and overshoots before the 10 ms speed window
+ * can react (measured: a visible lurch at every start). */
+#define SPD_RAMP_RPM_S          600.0f
 #define SPD_RPM_MAX             2000.0f   /* target limit                */
 /* sstep: settle first, then step the speed reference and record. */
 #define SSTEP_SETTLE_MS         300u

@@ -2158,7 +2158,8 @@ static void test_cmd(void)
 
         tx_clear();
         cmd_feed("spd\r\n");
-        T(tx_contains("spd ref 300 rpm"));
+        /* the ramp has not moved yet in the host test, so only the target is set */
+        T(tx_contains("(target 300)"));
 
         tx_clear();
         cmd_feed("spd 9999\r\n");

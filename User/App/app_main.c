@@ -73,6 +73,9 @@ static uint16_t s_prot_enc_zero_cnt;/* consecutive raw==0 frames        */
 /* S7.3 speed loop. */
 static alg_spd_t s_spd;
 static uint8_t   s_spd_div;
+static uint32_t  s_spd_kick_t0;  /* start of the kick window */
+static float     s_spd_target;    /* commanded, before the ramp  */
+static float     s_spd_ramp_hz;   /* rpm per second              */
 
 /* S7.4 speed step measurement. */
 static app_sstep_info_t s_sstep;
@@ -265,8 +268,9 @@ void app_init(void)
 
     bsp_vbus_init();
 
+    s_spd_ramp_hz = SPD_RAMP_RPM_S;
     alg_spd_init(&s_spd, SPD_KP, SPD_KI, FOC_I_MAX_A,
-                 SPD_FF_BASE, SPD_FF_SLOPE, SPD_KICK, SPD_KICK_RPM);
+                 SPD_FF_BASE, SPD_FF_SLOPE, SPD_KICK, SPD_KICK_MS);
     s_spd_div = 0u;
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
@@ -825,21 +829,28 @@ uint8_t app_spd_set(float rpm)
         return 0u;
     }
 
-    s_spd.spd_ref = rpm;
-    s_spd.on      = 1u;
+    /* The reference itself is ramped in the 1 kHz task; the kick window
+     * starts now so the rotor breaks free before the ramp asks for speed. */
+    s_spd_target   = rpm;
+    s_spd.on       = 1u;
+    s_spd.kick_on  = 1u;
+    s_spd_kick_t0  = HAL_GetTick();
     s_spd_div     = (uint8_t)SPD_DIV;   /* run a step on the next frame */
     alg_pi_reset(&s_spd.pi);
-    s_foc_info.spd_ref = rpm;
+    s_foc_info.spd_ref    = rpm;   /* display only; the loop uses the ramp */
+    s_foc_info.spd_target = rpm;
     return 0u;
 }
 
 void app_spd_off(void)
 {
-    s_spd.on      = 0u;
-    s_spd.spd_ref = 0.0f;
+    s_spd.on       = 0u;
+    s_spd.spd_ref  = 0.0f;
+    s_spd_target   = 0.0f;
     s_spd.out     = 0.0f;
     alg_pi_reset(&s_spd.pi);
     s_foc_info.spd_ref = 0.0f;
+    s_foc_info.spd_target = 0.0f;
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
 }
@@ -1523,6 +1534,27 @@ static void task_1ms(uint32_t now)
 
         prot_check_1ms(now);
         sstep_task(now);
+
+        /* S7.3: the start-up kick lasts SPD_KICK_MS after a target change only. */
+        if ((s_spd.kick_on != 0u) &&
+            ((uint32_t)(now - s_spd_kick_t0) >= (uint32_t)SPD_KICK_MS)) {
+            s_spd.kick_on = 0u;
+        }
+
+        /* Acceleration limit: walk spd_ref towards the commanded target at
+         * s_spd_ramp_hz rpm/s. 1 kHz, so one step is ramp/1000 rpm. */
+        if (s_spd.on != 0u) {
+            float step_rpm = s_spd_ramp_hz * 0.001f;
+            float d = s_spd_target - s_spd.spd_ref;
+
+            if (d > step_rpm) {
+                s_spd.spd_ref += step_rpm;
+            } else if (d < -step_rpm) {
+                s_spd.spd_ref -= step_rpm;
+            } else {
+                s_spd.spd_ref = s_spd_target;
+            }
+        }
     }
 
     if (dt >= 1000u) {

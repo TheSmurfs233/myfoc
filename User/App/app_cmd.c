@@ -441,9 +441,9 @@ static void cmd_exec(char *line)
                 }
             }
         } else {
-            log_printf("spd ref %d rpm, meas %d rpm, iq %.2f A",
-                       (int)f->spd_ref, (int)f->spd_rpm,
-                       (double)f->iq_ref);
+            log_printf("spd ref %d rpm (target %d), meas %d rpm, iq %.2f A",
+                       (int)f->spd_ref, (int)f->spd_target,
+                       (int)f->spd_rpm, (double)f->iq_ref);
             log_printf(" speed loop %s, spd off returns to idle",
                        (f->spd_ref != 0.0f) ? "ON" : "OFF");
         }
