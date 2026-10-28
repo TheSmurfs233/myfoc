@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             96u
+#define FW_BUILD_ID             102u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -333,13 +333,18 @@ extern "C" {
 #define SPD_FREQ_HZ             1000u
 #define SPD_DIV                 (FOC_FREQ_HZ / SPD_FREQ_HZ)
 #define SPD_TS_S                (1.0f / (float)SPD_FREQ_HZ)
-#define SPD_KP                  0.008f    /* A per rpm, tuned on hardware */
-#define SPD_KI                  0.030f    /* A per (rpm*s), tuned         */
+#define SPD_KP                  0.016f    /* A per rpm, measured best with sstep */
+#define SPD_KI                  0.100f    /* A per (rpm*s)                */
 #define SPD_FF_BASE             0.04f     /* friction feedforward, A     */
 #define SPD_FF_SLOPE            0.0f      /* A per rpm (not measurable)  */
 #define SPD_KICK                0.20f     /* breakaway current, A        */
 #define SPD_KICK_RPM            50.0f     /* kick only below this speed  */
 #define SPD_RPM_MAX             2000.0f   /* target limit                */
+/* sstep: settle first, then step the speed reference and record. */
+#define SSTEP_SETTLE_MS         300u
+#define SSTEP_SETTLE_MAX_MS     3000u   /* give up waiting after this */
+#define SSTEP_RECORD_MS         1000u
+
 
 #define FOC_I_MAX_A             1.20f    /* reference vector limit (ADC +-1.32 A) */
 /* Runtime tuning limits for the "pi" command. */

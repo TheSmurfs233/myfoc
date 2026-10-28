@@ -56,7 +56,7 @@ STM32G431KB + MT6701 + 3×INA240A2 的 FOC 无刷电机控制工程文档。
 - 结果看 `MDK-ARM/build.log`，产物在 `MDK-ARM/myfoc/myfoc.axf` / `.hex`
 - **每次换一个日志文件名**（`build2.log`、`b15.log`…）：Keil GUI 开着时同名 log 可能不被覆盖，
   会读到上一次的结果。**以返回码为准，别只看 log 内容。**
-- 基线（2026-10-25，S5 / #96）：`Code=49158 RO=2258 RW=364 ZI=9740`，RAM 占用 9.2KB / 32KB
+- 基线（2026-10-25，S5 / #102）：`Code=50474 RO=2326 RW=404 ZI=9772`，RAM 占用 9.2KB / 32KB
 
 ### 源码编码红线（踩过坑）
 

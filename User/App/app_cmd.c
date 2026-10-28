@@ -143,6 +143,7 @@ static void print_help(void)
     log_printf(" prot [os|st|siq|uv|ov <v>]  protection thresholds");
     log_printf(" spd <rpm>      speed loop target, spd off releases iq");
     log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
+    log_printf(" sstep <rpm>    measure a speed step at 1 kHz, prints the result");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
@@ -447,6 +448,33 @@ static void cmd_exec(char *line)
                        (f->spd_ref != 0.0f) ? "ON" : "OFF");
         }
     }
+    /* ---------------- sstep (S7.4) --------------- */
+    else if (strcmp(tok[0], "sstep") == 0) {
+        float rpm;
+
+        if (n != 2u) {
+            log_printf("ERR usage=sstep <rpm>, e.g. sstep 500");
+        } else if (!parse_num(tok[1], &rpm)) {
+            log_printf("ERR usage=sstep <rpm>, e.g. sstep 500");
+        } else {
+            switch (app_sstep_start(rpm)) {
+            case 0u:
+                log_printf("OK sstep %d rpm, wait 1 s for the result", (int)rpm);
+                break;
+            case 2u:
+                log_printf("ERR start first");
+                break;
+            case 4u:
+                log_printf("ERR mode 2 first (FOC)");
+                break;
+            default:
+                log_printf("ERR speed out of range (50..%d rpm)",
+                           (int)SPD_RPM_MAX);
+                break;
+            }
+        }
+    }
+
     /* ---------------- spi (S7.3) ----------------- */
     else if (strcmp(tok[0], "spi") == 0) {
         float kp;
@@ -474,8 +502,10 @@ static void cmd_exec(char *line)
                 }
             }
         } else {
-            log_printf("spi = kp %.3f A/rpm, ki %.3f A/(rpm s)",
-                       (double)kp, (double)ki);
+            /* fmt_float2 always prints two decimals, so 0.016 A/rpm would
+             * show as 0.02: print the gains in mA to keep them readable. */
+            log_printf("spi = kp %.2f mA/rpm, ki %.2f mA/(rpm s)",
+                       (double)(kp * 1000.0f), (double)(ki * 1000.0f));
         }
     }
 

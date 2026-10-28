@@ -2174,7 +2174,7 @@ static void test_cmd(void)
 
         tx_clear();
         cmd_feed("spi\r\n");
-        T(tx_contains("spi = kp 0.10"));
+        T(tx_contains("spi = kp 100.00 mA/rpm"));
 
         tx_clear();
         cmd_feed("spi 99 1\r\n");

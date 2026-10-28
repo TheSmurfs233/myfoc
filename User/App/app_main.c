@@ -43,6 +43,7 @@
 static app_status_t s_st;
 static uint32_t     s_loop_cnt;
 static uint32_t     s_t_1ms;
+static uint32_t     s_t_1k;   /* 1 kHz task timestamp */
 static uint32_t     s_t_wave;
 static uint32_t     s_t_enc;
 static uint16_t     s_wave_period_ms; /* upload period in ms */
@@ -72,6 +73,23 @@ static uint16_t s_prot_enc_zero_cnt;/* consecutive raw==0 frames        */
 /* S7.3 speed loop. */
 static alg_spd_t s_spd;
 static uint8_t   s_spd_div;
+
+/* S7.4 speed step measurement. */
+static app_sstep_info_t s_sstep;
+static uint8_t   s_sstep_phase;   /* 0 idle, 1 settle, 2 record  */
+static uint32_t  s_sstep_t0;
+static uint16_t  s_sstep_n;
+static uint16_t  s_sstep_t10;
+static uint16_t  s_sstep_t90;
+static uint16_t  s_sstep_settle;
+static uint8_t   s_sstep_got10;
+static uint8_t   s_sstep_got90;
+static uint8_t   s_sstep_in_band;
+static float     s_sstep_peak;
+static float     s_sstep_tail_min;
+static float     s_sstep_tail_max;
+static float     s_sstep_tail_sum;
+static uint16_t  s_sstep_tail_n;
 
 /* S6.4: automatic current step measurement. */
 static app_step_info_t s_step;
@@ -217,6 +235,7 @@ void app_init(void)
 
     s_loop_cnt       = 0u;
     s_t_1ms          = HAL_GetTick();
+    s_t_1k           = s_t_1ms;
     s_t_wave         = s_t_1ms;
     s_t_enc          = s_t_1ms;
     s_wave_period_ms = (uint16_t)(1000u / s_st.wave_rate_hz);
@@ -582,6 +601,7 @@ uint8_t app_stop(void)
     alg_foc_reset(&s_foc);
     app_spd_off();
     s_step_phase       = 0u;             /* cancel any running step */
+    s_sstep_phase      = 0u;
     /* Acknowledge the latched fault, keep the per-type counters. */
     s_fault.code       = (uint8_t)APP_FAULT_NONE;
     s_fault.value      = 0.0f;
@@ -839,6 +859,26 @@ void app_spd_get_pi(float *kp, float *ki)
 {
     if (kp != 0) { *kp = s_spd.pi.kp; }
     if (ki != 0) { *ki = s_spd.pi.ki; }
+}
+
+uint8_t app_sstep_start(float rpm)
+{
+    if (s_st.state != APP_ST_RUN) { return 2u; }
+    if (s_st.mode != CTRL_FOC)    { return 4u; }
+    if ((rpm > SPD_RPM_MAX) || (rpm < -SPD_RPM_MAX)) { return 5u; }
+    if ((rpm < 50.0f) && (rpm > -50.0f)) { return 5u; }
+
+    s_sstep.target = rpm;
+    s_sstep.valid  = 0u;
+    s_sstep_phase  = 1u;
+    s_sstep_t0     = HAL_GetTick();
+    app_spd_off();
+    return 0u;
+}
+
+const app_sstep_info_t *app_sstep_info(void)
+{
+    return &s_sstep;
 }
 
 uint8_t app_step_start(float amp)
@@ -1260,6 +1300,129 @@ static void task_enc_slow(uint32_t now)
 /* ------------------------------------------------------------------ */
 /* 1ms task: uptime and loop rate statistics                           */
 /* ------------------------------------------------------------------ */
+/* S7.4: speed step measurement, 1 kHz. Mirrors the current-loop "step". */
+static void sstep_task(uint32_t now)
+{
+    float spd = mid_enc_info()->spd_rpm;
+    float tgt = s_sstep.target;
+    uint32_t el;
+    float band;
+
+    if (s_sstep_phase == 0u) {
+        return;
+    }
+
+    if (s_sstep_phase == 1u) {          /* settle at zero speed */
+        uint32_t st = (uint32_t)(now - s_sstep_t0);
+
+        app_spd_off();
+        /* Wait until the rotor has really stopped: only checking the
+         * elapsed time left the previous run coasting, and a step that
+         * starts from 1000 rpm looks like 67% overshoot. */
+        if (((st >= (uint32_t)SSTEP_SETTLE_MS) &&
+             (mid_enc_info()->spd_rpm < 20.0f) &&
+             (mid_enc_info()->spd_rpm > -20.0f)) ||
+            (st >= (uint32_t)SSTEP_SETTLE_MAX_MS)) {
+            s_sstep_phase  = 2u;
+            s_sstep_t0     = now;
+            s_sstep_n      = 0u;
+            s_sstep_t10    = 0u;
+            s_sstep_t90    = 0u;
+            s_sstep_settle = 0u;
+            s_sstep_got10  = 0u;
+            s_sstep_got90  = 0u;
+            s_sstep_in_band = 0u;
+            s_sstep_peak   = 0.0f;
+            s_sstep_tail_min =  1e9f;
+            s_sstep_tail_max = -1e9f;
+            s_sstep_tail_sum = 0.0f;
+            s_sstep_tail_n   = 0u;
+            (void)app_spd_set(tgt);        /* the actual step */
+        }
+    } else if (s_sstep_phase == 2u) {   /* record the response */
+        el = (uint32_t)(now - s_sstep_t0);
+        s_sstep_n++;
+
+        if (s_sstep_n > 2u) {
+            float sgn = (tgt > 0.0f) ? 1.0f : -1.0f;
+            float y   = spd * sgn;         /* signed towards the target */
+            float a   = tgt * sgn;
+
+            if ((s_sstep_got10 == 0u) && (y >= (0.1f * a))) {
+                s_sstep_got10 = 1u;
+                s_sstep_t10   = s_sstep_n;
+            }
+            if ((s_sstep_got90 == 0u) && (y >= (0.9f * a))) {
+                s_sstep_got90 = 1u;
+                s_sstep_t90   = s_sstep_n;
+            }
+            if (y > s_sstep_peak) { s_sstep_peak = y; }
+
+            /* settle: inside +-5% of the target and staying there */
+            band = 0.05f * a;
+            if ((y > (a - band)) && (y < (a + band))) {
+                if (s_sstep_in_band == 0u) {
+                    s_sstep_in_band = 1u;
+                    s_sstep_settle  = s_sstep_n;
+                }
+            } else {
+                s_sstep_in_band = 0u;
+                s_sstep_settle  = 0u;
+            }
+
+            /* tail window: last 100 ms */
+            if ((uint32_t)el >= ((uint32_t)SSTEP_RECORD_MS - 100u)) {
+                if (y < s_sstep_tail_min) { s_sstep_tail_min = y; }
+                if (y > s_sstep_tail_max) { s_sstep_tail_max = y; }
+                s_sstep_tail_sum += y;
+                s_sstep_tail_n++;
+            }
+        }
+
+        if (el >= (uint32_t)SSTEP_RECORD_MS) {
+            float a = (tgt > 0.0f) ? tgt : -tgt;
+
+            s_sstep_phase = 0u;
+            s_sstep.valid = 1u;
+            s_sstep.rise_ms = -1.0f;
+            if ((s_sstep_got10 != 0u) && (s_sstep_got90 != 0u) &&
+                (s_sstep_t90 >= s_sstep_t10)) {
+                s_sstep.rise_ms = (float)(s_sstep_t90 - s_sstep_t10);
+            }
+            /* settle time from the step to entering the band, 1 kHz */
+            s_sstep.settle_ms = (float)s_sstep_settle;
+
+            s_sstep.overshoot = 0.0f;
+            if (a > 5.0f) {
+                s_sstep.overshoot = ((s_sstep_peak - a) / a) * 100.0f;
+                if (s_sstep.overshoot < 0.0f) { s_sstep.overshoot = 0.0f; }
+            }
+
+            s_sstep.err  = 0.0f;
+            s_sstep.ss   = 0.0f;
+            s_sstep.ripple = 0.0f;
+            if (s_sstep_tail_n != 0u) {
+                float avg = s_sstep_tail_sum / (float)s_sstep_tail_n;
+                s_sstep.ss = avg;
+                if (a > 5.0f) {
+                    s_sstep.err = ((avg - a) / a) * 100.0f;
+                    if (s_sstep.err < 0.0f) { s_sstep.err = -s_sstep.err; }
+                }
+                s_sstep.ripple = s_sstep_tail_max - s_sstep_tail_min;
+            }
+            s_sstep.peak = s_sstep_peak;
+
+            app_spd_off();
+            log_printf("OK sstep %d rpm, rise %d ms, over %.1f%%, err %.1f%%",
+                       (int)tgt, (int)s_sstep.rise_ms,
+                       (double)s_sstep.overshoot, (double)s_sstep.err);
+            log_printf(" settle %d ms, ss %d rpm, peak %d rpm, rip %d rpm",
+                       (int)s_sstep.settle_ms, (int)s_sstep.ss,
+                       (int)s_sstep.peak, (int)s_sstep.ripple);
+        }
+    }
+}
+
 /* S7.6: speed and bus-voltage protections, evaluated once per millisecond. */
 static void prot_check_1ms(uint32_t now)
 {
@@ -1344,14 +1507,23 @@ static void prot_check_1ms(uint32_t now)
 static void task_1ms(uint32_t now)
 {
     uint32_t dt = (uint32_t)(now - s_t_1ms);
+    uint32_t d1 = (uint32_t)(now - s_t_1k);
 
-    /* S7.5: the bus voltage moves slowly; 1 kHz with a 5 ms filter is
-     * plenty and keeps the control loop free of extra work. */
-    if (bsp_vbus_update() != 0u) {
-        alg_foc_set_vdc(&s_foc, bsp_vbus_volts());
+    /* ---- true 1 kHz work -------------------------------------------
+     * NOTE: the dt >= 1000 block below is the once-per-SECOND stats
+     * block, not a 1 ms one. Putting this work there made sstep advance
+     * once per second (metrics empty) and made the bus-voltage filter
+     * run at the loop rate. A dedicated timestamp is the simple fix. */
+    if (d1 >= 1u) {
+        s_t_1k = now;
+
+        if (bsp_vbus_update() != 0u) {
+            alg_foc_set_vdc(&s_foc, bsp_vbus_volts());
+        }
+
+        prot_check_1ms(now);
+        sstep_task(now);
     }
-
-    prot_check_1ms(now);
 
     if (dt >= 1000u) {
         /* s_loop_cnt counts iterations over dt milliseconds.

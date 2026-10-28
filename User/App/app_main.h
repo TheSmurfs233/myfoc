@@ -173,6 +173,23 @@ void    app_spd_off(void);
 uint8_t app_spd_set_pi(float kp, float ki);
 void    app_spd_get_pi(float *kp, float *ki);
 
+typedef struct {
+    float   target;       /* commanded speed, rpm            */
+    float   rise_ms;      /* 10% -> 90%                      */
+    float   overshoot;    /* percent of the step             */
+    float   err;          /* steady state error, percent     */
+    float   settle_ms;    /* time to enter +-5% and stay     */
+    float   ripple;       /* peak to peak in the tail, rpm   */
+    float   ss;           /* measured steady state, rpm      */
+    float   peak;         /* highest measured, rpm           */
+    uint8_t valid;
+} app_sstep_info_t;
+
+/* Automated speed step (needs RUN + CTRL_FOC).
+ * Returns 0 = OK, 2 = not running, 4 = wrong mode, 5 = too fast. */
+uint8_t app_sstep_start(float rpm);
+const app_sstep_info_t *app_sstep_info(void);
+
 uint8_t app_step_start(float amp);
 const app_step_info_t *app_step_info(void);
 /* ---------------- protections (S7.6) ---------------- */

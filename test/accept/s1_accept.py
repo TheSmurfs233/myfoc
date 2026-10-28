@@ -130,7 +130,7 @@ def main():
     # ---------- 1. help ----------
     out = lk.send("help")
     ls = lines(out)
-    check("help: 38 lines", len(ls) == 38, "got %d" % len(ls))
+    check("help: 39 lines", len(ls) == 39, "got %d" % len(ls))
     check("help: first line", ls and ls[0] == "[log] ---- commands ----", ls[0] if ls else "-")
     check("help: last line", ls and ls[-1] == "[log] ------------------", ls[-1] if ls else "-")
     check("help: rate says 1..500",
