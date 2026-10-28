@@ -864,6 +864,29 @@ void app_spd_off(void)
     s_foc_info.iq_ref  = 0.0f;
 }
 
+uint8_t app_spd_set_ff(float base_a, float slope_a_per_rpm)
+{
+    if ((base_a < 0.0f) || (base_a > 0.5f)) {
+        return 1u;
+    }
+    if ((slope_a_per_rpm < 0.0f) || (slope_a_per_rpm > 5e-4f)) {
+        return 1u;
+    }
+    s_spd.ff_base  = base_a;
+    s_spd.ff_slope = slope_a_per_rpm;
+    return 0u;
+}
+
+void app_spd_get_ff(float *base_a, float *slope_a_per_rpm)
+{
+    if (base_a != 0) {
+        *base_a = s_spd.ff_base;
+    }
+    if (slope_a_per_rpm != 0) {
+        *slope_a_per_rpm = s_spd.ff_slope;
+    }
+}
+
 uint8_t app_spd_set_pi(float kp, float ki)
 {
     if ((kp < 0.0f) || (kp > 5.0f))   { return 1u; }

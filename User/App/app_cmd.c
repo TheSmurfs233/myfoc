@@ -145,6 +145,7 @@ static void print_help(void)
     log_printf(" spd <rpm>      speed loop target, spd off releases iq");
     log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
     log_printf(" sstep <rpm>    measure a speed step at 1 kHz, prints the result");
+    log_printf(" sff [<base> <slope>]  friction feedforward, slope is A per 1000 rpm");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
@@ -449,6 +450,30 @@ static void cmd_exec(char *line)
                        (f->spd_ref != 0.0f) ? "ON" : "OFF");
         }
     }
+    /* ---------------- sff (option C) ------------- */
+    else if (strcmp(tok[0], "sff") == 0) {
+        float b = 0.0f;
+        float k = 0.0f;
+
+        app_spd_get_ff(&b, &k);
+        if (n == 3u) {
+            float nb;
+            float nk;
+
+            if (!parse_num(tok[1], &nb) || !parse_num(tok[2], &nk)) {
+                log_printf("ERR usage=sff <base A> <slope A/krpm>");
+            } else if (app_spd_set_ff(nb, nk * 0.001f) != 0u) {
+                log_printf("ERR sff out of range");
+            } else {
+                log_printf("OK sff base %.3f A, slope %.3f A/krpm",
+                           (double)nb, (double)nk);
+            }
+        } else {
+            log_printf("sff base %.3f A, slope %.3f A/krpm",
+                       (double)b, (double)(k * 1000.0f));
+        }
+    }
+
     /* ---------------- sstep (S7.4) --------------- */
     else if (strcmp(tok[0], "sstep") == 0) {
         float rpm;

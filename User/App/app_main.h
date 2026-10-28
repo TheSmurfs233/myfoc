@@ -191,6 +191,11 @@ typedef struct {
 uint8_t app_sstep_start(float rpm);
 const app_sstep_info_t *app_sstep_info(void);
 
+/* Friction feedforward: base current + slope per rpm (option C, S7.3).
+ * Returns 0 = OK, 1 = out of range. */
+uint8_t app_spd_set_ff(float base_a, float slope_a_per_rpm);
+void    app_spd_get_ff(float *base_a, float *slope_a_per_rpm);
+
 uint8_t app_step_start(float amp);
 const app_step_info_t *app_step_info(void);
 /* ---------------- protections (S7.6) ---------------- */
