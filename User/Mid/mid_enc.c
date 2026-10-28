@@ -17,6 +17,7 @@
   */
 
 #include "mid_enc.h"
+#include "alg_pll.h"
 #include "board_cfg.h"
 #include "bsp_flash.h"
 #include "bsp_prof.h"
@@ -39,6 +40,10 @@ static mid_enc_t s_enc;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
+static alg_pll_t s_pll;          /* S8.1 speed observer */
+static uint8_t   s_spd_src;      /* 0 window, 1 PLL */
+static float     s_win_rpm;      /* window estimator, for comparison */
+static uint32_t  s_t_pll;        /* PLL sample timestamp */
 static uint8_t  s_have_prev;
 static uint32_t s_t_prev;
 static float    s_prev_mech;
@@ -164,6 +169,13 @@ void mid_enc_init(void)
     bsp_ssi_init();
     enc_load();
 
+
+    /* S8.1: speed observer. The angle fed in is the electrical one, so the
+     * PLL output is already in electrical rad/s. */
+    alg_pll_init(&s_pll, PLL_WN_HZ, PLL_ZETA,
+                 ENC_TWO_PI * (SPD_RPM_MAX / 60.0f) * (float)ENC_POLE_PAIRS);
+    s_spd_src = ENC_SPD_DEFAULT;
+    s_win_rpm = 0.0f;
 }
 
 void mid_enc_update(void)
@@ -233,6 +245,34 @@ void mid_enc_update(void)
     s_enc.mech_deg = mech * ENC_RAD_TO_DEG;
     s_enc.elec_deg = elec * ENC_RAD_TO_DEG;
 
+    /* ---- S8.1: PLL observer, every frame ---- */
+    {
+        uint32_t nowp = bsp_prof_now();
+
+        if (s_t_pll != 0u) {
+            uint32_t dtp = nowp - s_t_pll;
+
+            /* A gap (after "enc zero" or a stalled loop) would make the
+             * loop see a huge delta: restart instead of following it. */
+            if ((dtp > 0u) && (dtp < (2u * SYS_CORE_CLK_HZ / 1000u))) {
+                float w_rad = alg_pll_step(&s_pll, elec,
+                                           (float)dtp / (float)SYS_CORE_CLK_HZ);
+
+                if (s_spd_src == 1u) {
+                    float f_elec = w_rad / ENC_TWO_PI;
+
+                    s_enc.spd_hz  = f_elec;
+                    s_enc.spd_rpm = f_elec * (60.0f / (float)ENC_POLE_PAIRS);
+                }
+            } else {
+                alg_pll_reset(&s_pll, elec);
+            }
+        } else {
+            alg_pll_reset(&s_pll, elec);
+        }
+        s_t_pll = nowp;
+    }
+
     /* ---- speed: angle delta over a fixed time window ---- */
     {
         uint32_t now = bsp_prof_now();
@@ -272,8 +312,14 @@ void mid_enc_update(void)
 
             if (s_acc_cyc >= (SYS_CORE_CLK_HZ / 1000u) * ENC_SPD_WINDOW_MS) {
                 float dt_s = (float)s_acc_cyc / (float)SYS_CORE_CLK_HZ;
-                s_enc.spd_hz  = (s_acc_elec / dt_s) / ENC_TWO_PI;
-                s_enc.spd_rpm = (s_acc_mech / dt_s) * (60.0f / ENC_TWO_PI);
+                s_win_rpm = ((s_acc_mech / dt_s) * (60.0f / ENC_TWO_PI));
+
+                /* The window estimator only drives the outputs when it is
+                 * the selected source; the PLL keeps them otherwise. */
+                if (s_spd_src == 0u) {
+                    s_enc.spd_hz  = (s_acc_elec / dt_s) / ENC_TWO_PI;
+                    s_enc.spd_rpm = s_win_rpm;
+                }
                 s_acc_mech = 0.0f;
                 s_acc_elec = 0.0f;
                 s_acc_cyc  = 0u;
@@ -284,6 +330,39 @@ void mid_enc_update(void)
     }
 
     s_enc.valid = 1u;
+}
+
+void mid_enc_set_spd_src(uint8_t src)
+{
+    s_spd_src = src;
+    if (src == 1u) {
+        alg_pll_reset(&s_pll, s_enc.elec_deg * (ENC_TWO_PI / 360.0f));
+    }
+}
+
+uint8_t mid_enc_spd_src(void)
+{
+    return s_spd_src;
+}
+
+float mid_enc_pll_rpm(void)
+{
+    return (s_pll.omega / ENC_TWO_PI) * (60.0f / (float)ENC_POLE_PAIRS);
+}
+
+uint8_t mid_enc_pll_locked(void)
+{
+    return s_pll.locked;
+}
+
+void mid_enc_set_pll_bw(float wn_hz, float zeta)
+{
+    alg_pll_set_bw(&s_pll, wn_hz, zeta);
+}
+
+float mid_enc_win_rpm(void)
+{
+    return s_win_rpm;
 }
 
 const mid_enc_t *mid_enc_info(void)

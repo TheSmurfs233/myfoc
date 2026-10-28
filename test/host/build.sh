@@ -34,6 +34,7 @@ SRC="$HERE/test_main.c
      $ROOT/User/Alg/alg_pi.c
      $ROOT/User/Alg/alg_foc.c
      $ROOT/User/Alg/alg_spd.c
+     $ROOT/User/Alg/alg_pll.c
      $ROOT/User/Bsp/bsp_gpio.c
      $ROOT/User/Bsp/bsp_pwm.c
      $ROOT/User/Bsp/bsp_adc.c

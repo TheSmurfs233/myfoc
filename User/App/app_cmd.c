@@ -146,6 +146,7 @@ static void print_help(void)
     log_printf(" spi <kp> <ki>  speed PI gains, spi shows them");
     log_printf(" sstep <rpm>    measure a speed step at 1 kHz, prints the result");
     log_printf(" sff [<base> <slope>]  friction feedforward, slope is A per 1000 rpm");
+    log_printf(" pll [on|off|wn <hz>|zeta <v>]  speed observer");
     log_printf(" vf off         stop modulating, back to the 50%% zero vector");
     log_printf(" acc <hz/s>     frequency ramp rate 1..200 Hz/s");
     log_printf(" dir <0|1>      phase sequence, 1 reverses the rotation");
@@ -250,7 +251,10 @@ static void cmd_exec(char *line)
     n = split_args(line, tok, 4u);
     if (n == 0u) { return; }
 
-    /* ---------------- help ---------------- */
+    static float   s_pll_wn   = PLL_WN_HZ;
+static float   s_pll_zeta = PLL_ZETA;
+
+/* ---------------- help ---------------- */
     if (strcmp(tok[0], "help") == 0) {
         print_help();
     }
@@ -450,6 +454,52 @@ static void cmd_exec(char *line)
                        (f->spd_ref != 0.0f) ? "ON" : "OFF");
         }
     }
+    /* ---------------- pll (S8.1) ---------------- */
+    else if (strcmp(tok[0], "pll") == 0) {
+        if (n == 2u) {
+            if (strcmp(tok[1], "on") == 0) {
+                mid_enc_set_spd_src(1u);
+                log_printf("OK pll speed source");
+            } else if (strcmp(tok[1], "off") == 0) {
+                mid_enc_set_spd_src(0u);
+                log_printf("OK window speed source");
+            } else {
+                log_printf("ERR usage=pll on|off|wn <hz>|zeta <v>");
+            }
+        } else if (n == 3u) {
+            float v;
+
+            if (!parse_num(tok[2], &v)) {
+                log_printf("ERR usage=pll wn <hz>|zeta <v>");
+            } else if (strcmp(tok[1], "wn") == 0) {
+                if ((v < 10.0f) || (v > 400.0f)) {
+                    log_printf("ERR wn range 10..400 Hz");
+                } else {
+                    mid_enc_set_pll_bw(v, s_pll_zeta);
+                    s_pll_wn = v;
+                    log_printf("OK pll wn = %.1f Hz", (double)v);
+                }
+            } else if (strcmp(tok[1], "zeta") == 0) {
+                if ((v < 0.3f) || (v > 2.0f)) {
+                    log_printf("ERR zeta range 0.3..2.0");
+                } else {
+                    mid_enc_set_pll_bw(s_pll_wn, v);
+                    s_pll_zeta = v;
+                    log_printf("OK pll zeta = %.3f", (double)v);
+                }
+            } else {
+                log_printf("ERR usage=pll wn <hz>|zeta <v>");
+            }
+        } else {
+            log_printf("pll src %s, wn %.1f Hz, zeta %.3f, locked %u",
+                       (mid_enc_spd_src() != 0u) ? "pll" : "window",
+                       (double)s_pll_wn, (double)s_pll_zeta,
+                       (unsigned)mid_enc_pll_locked());
+            log_printf(" pll %d rpm, window %d rpm",
+                       (int)mid_enc_pll_rpm(), (int)mid_enc_win_rpm());
+        }
+    }
+
     /* ---------------- sff (option C) ------------- */
     else if (strcmp(tok[0], "sff") == 0) {
         float b = 0.0f;

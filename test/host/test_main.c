@@ -37,6 +37,7 @@
 #include "alg_pi.h"
 #include "alg_foc.h"
 #include "alg_spd.h"
+#include "alg_pll.h"
 #include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
@@ -1090,6 +1091,7 @@ static void test_enc(void)
         uint8_t k;
         extern DWT_TypeDef fake_dwt;
 
+        mid_enc_set_spd_src(0u);   /* S8.1: the PLL is default, this tests the window */
         fake_dwt.CYCCNT = 1000000u;
         enc_build_frame(0u, 0u);
         mid_enc_update();                 /* first sample: no delta yet */
@@ -2282,6 +2284,96 @@ static void test_cmd(void)
         cmd_feed(big);
         cmd_feed("\r\n");
         T(tx_contains("ERR line too long"));
+    }
+    section_end();
+
+    section("alg_pll: locks onto a constant speed");
+    {
+        alg_pll_t p;
+        float th = 0.0f;
+        float w  = 2.0f * 3.14159265f * 10.0f;   /* 10 Hz elec */
+        int i;
+
+        alg_pll_init(&p, 100.0f, 0.707f, 2000.0f);
+        alg_pll_reset(&p, 0.0f);
+        for (i = 0; i < 4000; i++) {             /* 200 ms at 20 kHz */
+            th += w * (1.0f / 20000.0f);
+            while (th >= 6.2831853f) { th -= 6.2831853f; }
+            alg_pll_step(&p, th, 1.0f / 20000.0f);
+        }
+        T(fabsf(p.omega - w) < (0.02f * w));
+        T(p.locked == 1u);
+    }
+    section_end();
+
+    section("alg_pll: crosses the 2pi wrap without a glitch");
+    {
+        alg_pll_t p;
+        float th = 6.0f;
+        float w  = 2.0f * 3.14159265f * 20.0f;
+        float worst = 0.0f;
+        int i;
+
+        alg_pll_init(&p, 100.0f, 0.707f, 2000.0f);
+        alg_pll_reset(&p, th);
+        for (i = 0; i < 4000; i++) {
+            float e;
+
+            th += w * (1.0f / 20000.0f);
+            while (th >= 6.2831853f) { th -= 6.2831853f; }
+            alg_pll_step(&p, th, 1.0f / 20000.0f);
+            e = fabsf(p.omega - w);
+            if (i > 2000) { if (e > worst) { worst = e; } }
+        }
+        T(worst < (0.03f * w));
+    }
+    section_end();
+
+    section("alg_pll: clamps a runaway speed");
+    {
+        alg_pll_t p;
+        float th = 0.0f;
+        int i;
+
+        alg_pll_init(&p, 100.0f, 0.707f, 50.0f);
+        alg_pll_reset(&p, 0.0f);
+        for (i = 0; i < 2000; i++) {
+            th += 3.0f * (1.0f / 20000.0f);   /* very fast angle ramp */
+            while (th >= 6.2831853f) { th -= 6.2831853f; }
+            alg_pll_step(&p, th, 1.0f / 20000.0f);
+        }
+        T(p.omega <= 50.01f);
+    }
+    section_end();
+
+    section("pll: command switches the speed source");
+    {
+        tx_clear();
+        cmd_feed("pll on\r\n");
+        T(tx_contains("OK pll speed source"));
+        T(mid_enc_spd_src() == 1u);
+
+        tx_clear();
+        cmd_feed("pll off\r\n");
+        T(tx_contains("OK window speed source"));
+        T(mid_enc_spd_src() == 0u);
+
+        tx_clear();
+        cmd_feed("pll wn 200\r\n");
+        T(tx_contains("OK pll wn = 200.00 Hz"));
+
+        tx_clear();
+        cmd_feed("pll zeta 1.0\r\n");
+        T(tx_contains("OK pll zeta = 1.00"));
+
+        tx_clear();
+        cmd_feed("pll\r\n");
+        T(tx_contains("pll src window"));
+
+        /* restore defaults for the sections that follow */
+        cmd_feed("pll wn 100\r\n");
+        cmd_feed("pll zeta 0.707\r\n");
+        cmd_feed("pll off\r\n");
     }
     section_end();
 

@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             119u
+#define FW_BUILD_ID             123u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -298,10 +298,12 @@ extern "C" {
 
 /* VOFA+ waveform: number of channels per frame (FireWater: 5 bytes each).
  *   0 time, 1..3 duties, 4..6 phase currents, 7..9 encoder,
- *   10 id, 11 iq, 12 id_ref, 13 iq_ref, 14 vd, 15 vq, 16 vbus
- * 17 channels * 5 B = 85 B per frame; at 500 Hz that is 42.5 kB/s of the
+ *   10 id, 11 iq, 12 id_ref, 13 iq_ref, 14 vd, 15 vq, 16 vbus,
+ *   17 window speed (rpm), 18 PLL speed (rpm) -- the last two are for the
+ *   S8.1 observer comparison.
+ * 19 channels * 5 B = 95 B per frame; at 500 Hz that is 47.5 kB/s of the
  * 100 kB/s the 1 Mbaud link provides. */
-#define WAVE_CH                 17u
+#define WAVE_CH                 19u
 
 /* FOC current loop (S6).
  * Design start: R = 2.3 ohm/phase, L = 0.5 mH, fc = 500 Hz ->
@@ -399,6 +401,16 @@ extern "C" {
  * a per-sample delta keeps the 14-bit quantisation from dominating at low
  * speed (0.022 deg/LSB). */
 #define ENC_SPD_WINDOW_MS       10u
+/* S8.1: PLL speed observer. wn is the loop natural frequency in Hz;
+ * 100 Hz gives about 1.6 ms of delay versus 15 ms for the window, so the
+ * speed loop can run 3-5x faster. 0 selects the window estimator. */
+#define PLL_WN_HZ               14.0f
+#define PLL_ZETA                0.707f
+/* Speed source selector. NOTE: an earlier version defined
+ * ENC_SPD_SRC_PLL as 0, which silently selected the window estimator. */
+#define ENC_SPD_SRC_WIN         0u
+#define ENC_SPD_SRC_PLL         1u
+#define ENC_SPD_DEFAULT         ENC_SPD_SRC_PLL
 
 
 /* ==========================================================================

@@ -130,7 +130,7 @@ def main():
     # ---------- 1. help ----------
     out = lk.send("help")
     ls = lines(out)
-    check("help: 41 lines", len(ls) == 41, "got %d" % len(ls))
+    check("help: 42 lines", len(ls) == 42, "got %d" % len(ls))
     check("help: first line", ls and ls[0] == "[log] ---- commands ----", ls[0] if ls else "-")
     check("help: last line", ls and ls[-1] == "[log] ------------------", ls[-1] if ls else "-")
     check("help: rate says 1..500",
@@ -299,8 +299,8 @@ def main():
 
     # every row must have exactly 17 fields: t, duty a/b/c, ia/ib/ic,
     # enc mech/elec/spd, id, iq, id_ref, iq_ref, vd, vq, vbus
-    bad = [x for x in csv if len(x.split(",")) != 17]
-    check("wave: every row has 17 channels", not bad, str(bad[:2]))
+    bad = [x for x in csv if len(x.split(",")) != 19]
+    check("wave: every row has 19 channels", not bad, str(bad[:2]))
 
     rows = [[float(v) for v in x.split(",")] for x in csv]
     if rows:

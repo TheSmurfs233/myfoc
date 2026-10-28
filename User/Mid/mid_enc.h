@@ -48,6 +48,15 @@ void mid_enc_update(void);
 const mid_enc_t *mid_enc_info(void);
 
 /* Current mechanical angle becomes electrical zero. Persists to flash. */
+/* Speed source: 0 = 10 ms window, 1 = PLL observer (S8.1). */
+void    mid_enc_set_spd_src(uint8_t src);
+uint8_t mid_enc_spd_src(void);
+/* Window estimator result, kept for comparison. */
+float   mid_enc_win_rpm(void);
+float   mid_enc_pll_rpm(void);      /* PLL result regardless of source */
+uint8_t mid_enc_pll_locked(void);
+void    mid_enc_set_pll_bw(float wn_hz, float zeta);
+
 uint8_t mid_enc_zero(void);
 
 /* Set the electrical zero to an explicit mechanical angle (degrees).
