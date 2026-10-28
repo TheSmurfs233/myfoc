@@ -39,7 +39,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             123u
+#define FW_BUILD_ID             126u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -349,6 +349,10 @@ extern "C" {
  * accelerates at ~2900 rpm/s and overshoots before the 10 ms speed window
  * can react (measured: a visible lurch at every start). */
 #define SPD_RAMP_RPM_S          600.0f
+/* Acceleration feedforward: iq needs J/Kt amperes per rad/s^2 to follow the
+ * reference ramp. J/Kt = 9e-5 / 0.0289 = 3.1e-3. Without it the integrator
+ * had to build ~0.2 A during the ramp and the 100 rpm step overshot ~96%. */
+#define SPD_FF_ACC              0.0031f  /* A per rad/s^2 */
 /* Gain scheduling. At high speed the 10 ms speed window leaves a ripple at
  * the electrical frequency (58 Hz at 500 rpm) and a high Kp turns it into
  * a current ripple (measured 0.69 A with kp 0.016 vs 0.07 A with 0.004).
@@ -370,8 +374,10 @@ extern "C" {
 #define SPD_RPM_MAX             2000.0f   /* target limit                */
 /* sstep: settle first, then step the speed reference and record. */
 #define SSTEP_SETTLE_MS         300u
-#define SSTEP_SETTLE_MAX_MS     3000u   /* give up waiting after this */
-#define SSTEP_RECORD_MS         1000u
+#define SSTEP_SETTLE_MAX_MS     10000u   /* give up waiting after this */
+/* The reference ramp is 600 rpm/s, so an 800 rpm step needs 1.33 s before
+ * the steady state is meaningful; 1 s reported "err 28%" for it. */
+#define SSTEP_RECORD_MS         2000u
 
 
 #define FOC_I_MAX_A             1.20f    /* reference vector limit (ADC +-1.32 A) */

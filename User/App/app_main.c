@@ -280,6 +280,7 @@ void app_init(void)
      * scheduling), which silently disabled the feature earlier. */
     alg_spd_set_sched(&s_spd, SPD_GAIN_LO_RPM, SPD_GAIN_HI_RPM, SPD_GAIN_HI_SCALE);
     alg_spd_set_lpf(&s_spd, SPD_LPF_LO_RPM, SPD_LPF_HI_RPM, SPD_LPF_LO_K, SPD_LPF_HI_K);
+    s_spd.ff_acc = SPD_FF_ACC;
     s_spd_div = 0u;
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;

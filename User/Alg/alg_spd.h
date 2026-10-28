@@ -36,6 +36,8 @@ typedef struct {
     float    out_max;     /* current limit, A                       */
     float    spd_ref;     /* rpm                                    */
     float    out;         /* iq reference produced last step, A     */
+    float    ff_acc;      /* A per rad/s^2, acceleration feedforward */
+    float    ref_prev;    /* previous reference, for the derivative  */
     uint8_t  on;
     uint8_t  kick_on;    /* set by the App for a short start-up window */
     float    gain_lo_rpm;   /* full gains below this speed            */

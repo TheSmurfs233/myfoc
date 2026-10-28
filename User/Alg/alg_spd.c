@@ -41,6 +41,8 @@ void alg_spd_init(alg_spd_t *s, float kp, float ki, float out_max,
     s->lpf_hi_k      = 1.0f;
     s->spd_f         = 0.0f;
     s->out_max  = (out_max  > 0.0f) ? out_max  : 1.0f;
+    s->ff_acc   = 0.0f;
+    s->ref_prev = 0.0f;
 
     alg_spd_reset(s);
 }
@@ -54,6 +56,7 @@ void alg_spd_reset(alg_spd_t *s)
     s->spd_ref = 0.0f;
     s->out     = 0.0f;
     s->on      = 0u;
+    s->ref_prev = 0.0f;
     s->kick_on = 0u;
     s->pi.out_max = s->out_max;
     s->pi.out_min = -s->out_max;
@@ -159,6 +162,16 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
     /* Friction feedforward: helps low speed a lot because the 10 ms speed
      * window makes the loop slow to react. */
     ff = s->ff_base + (s->ff_slope * ((ref > 0.0f) ? ref : -ref));
+
+    /* Acceleration feedforward: J/Kt * d(ref)/dt. Following the 600 rpm/s
+     * ramp needs about 0.2 A; without this the integrator had to build it
+     * and the loop overshot (measured: a 100 rpm step reached 196 rpm). */
+    if (s->ff_acc > 0.0f) {
+        float alpha = ((ref - s->ref_prev) / ts) * (6.2831853f / 60.0f);
+
+        u += s->ff_acc * alpha;
+    }
+    s->ref_prev = ref;
     u += (ref > 0.0f) ? ff : -ff;
 
     /* Start-up kick. It is deliberately NOT gated by the measured speed any
@@ -168,12 +181,24 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
      * change; a rotor that never moves is caught by the stall protection. */
     /* The kick must release as soon as the rotor moves: holding 0.20 A for
      * the whole window accelerates at ~690 rpm/s, which for a 30 rpm target
-     * gave a 128 rpm peak (measured). So: kick window AND still not moving. */
-    if ((s->kick_on != 0u) && (spd_rpm < 10.0f) && (spd_rpm > -10.0f)) {
-        if (ref > 0.0f) {
-            if (u <  s->kick) { u =  s->kick; }
-        } else {
-            if (u > -s->kick) { u = -s->kick; }
+     * gave a 128 rpm peak (measured). So: kick window AND still not moving.
+     *
+     * The gate also scales with the target: with a fixed 10 rpm gate a
+     * 100 rpm step overshot by 20% because the kick kept accelerating for
+     * the whole window. */
+    {
+        float gate = (0.10f * ((ref > 0.0f) ? ref : -ref)) + 5.0f;
+
+        if (gate < 10.0f) {
+            gate = 10.0f;
+        }
+
+        if ((s->kick_on != 0u) && (spd_rpm < gate) && (spd_rpm > -gate)) {
+            if (ref > 0.0f) {
+                if (u <  s->kick) { u =  s->kick; }
+            } else {
+                if (u > -s->kick) { u = -s->kick; }
+            }
         }
     }
 
