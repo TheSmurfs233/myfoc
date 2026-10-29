@@ -248,7 +248,7 @@ stop
    foc_core 算出 vα,vβ (V)
         │
         ▼
-   alg_svpwm_calc(vα, vβ, vdc, &out)   ← vdc 来自母线采样（TBD）或固定标称值
+   alg_svpwm_calc(vα, vβ, vdc, &out)   ← vdc 来自 ADC1_IN2 实测母线（S7.5，1 kHz 更新）
         │
         ▼
    bsp_pwm_set_duty(out.ta, out.tb, out.tc)
