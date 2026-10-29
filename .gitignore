@@ -8,6 +8,11 @@ MDK-ARM/DebugConfig/
 MDK-ARM/*.log
 MDK-ARM/*.uvguix
 MDK-ARM/*.uvguix.*
+# Keil per-user state: debugger selection, window layout, breakpoints, open
+# tabs. It holds no build information (IncludeInBuild lives in the .uvprojx),
+# but Keil rewrites the whole file on every open/build, which produced ~900
+# line diffs in otherwise small commits. The .uvprojx stays tracked.
+MDK-ARM/*.uvoptx
 *.axf
 *.hex
 *.bin
