@@ -155,7 +155,7 @@ static void print_help(void)
     log_printf(" phase [reset]  where each step lands in the 50us PWM period");
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
-    log_printf(" enc [zero|dir|raw]  MT6701 angle, zero capture, direction");
+    log_printf(" enc [zero [deg]|dir|raw]  angle, zero capture/restore, direction");
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
@@ -903,7 +903,19 @@ static float   s_pll_zeta = PLL_ZETA;
     else if (strcmp(tok[0], "enc") == 0) {
         const mid_enc_t *e = mid_enc_info();
 
-        if ((n >= 2u) && (strcmp(tok[1], "zero") == 0)) {
+        if ((n >= 3u) && (strcmp(tok[1], "zero") == 0)) {
+            /* Explicit value: restore a previously recorded zero exactly.
+             * "enc zero" (no argument) captures the current position. */
+            float deg;
+
+            if (!parse_num(tok[2], &deg) || (deg < 0.0f) || (deg >= 360.0f)) {
+                log_printf("ERR usage=enc zero [<deg 0..360>]");
+            } else if (mid_enc_zero_set(deg) == 0u) {
+                log_printf("OK enc zero = %.2f deg (saved)", (double)deg);
+            } else {
+                log_printf("ERR enc zero write failed");
+            }
+        } else if ((n >= 2u) && (strcmp(tok[1], "zero") == 0)) {
             if (mid_enc_zero() == 0u) {
                 log_printf("OK enc zero, off %.2f deg (saved)",
                            (double)mid_enc_info()->zero_deg);
