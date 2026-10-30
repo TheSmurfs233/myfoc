@@ -9,6 +9,7 @@
   */
 
 #include "app_cmd.h"
+#include <math.h>
 #include "app_main.h"
 #include "alg_obs.h"
 #include "board_cfg.h"
@@ -985,12 +986,13 @@ static float   s_pll_zeta = PLL_ZETA;
                        (double)(app_ho_dth() * 57.29577951308232f),
                        (unsigned)app_sfoc_on());
             {
-                float eq_a3 = (o->eq > 0.0f) ? o->eq : -o->eq;
+                float eq_a3 = sqrtf((o->e_alpha * o->e_alpha) +
+                                    (o->e_beta  * o->e_beta));   /* |e| */
                 float w_a3  = (o->omega_e > 0.0f) ? o->omega_e : -o->omega_e;
                 float ex_a3 = w_a3 * MOTOR_KE_V_RAD_S;
                 float r3    = (ex_a3 > 0.05f) ? (eq_a3 / ex_a3) : 0.0f;
 
-                log_printf(" diag: if run %u phase %u f %.1f Hz, ho cnt %u, eq/exp %.2f",
+                log_printf(" diag: if run %u phase %u f %.1f Hz, ho cnt %u, |e|/exp %.2f",
                            (unsigned)app_if_on(), (unsigned)app_if_phase(),
                            (double)app_if_freq_hz(), (unsigned)app_ho_cnt(),
                            (double)r3);

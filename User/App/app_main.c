@@ -1303,7 +1303,8 @@ static void task_foc(uint32_t t_pick)
      * the speed loop keeps pushing. Detect and drop out. */
     if ((s_sfoc != 0u) && (s_ho_state == 3u)) {   /* only once handed over */
         float spd_obs = s_obs.omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS;
-        float eq_a = (s_obs.eq > 0.0f) ? s_obs.eq : -s_obs.eq;
+        float eq_a = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
+                           (s_obs.e_beta  * s_obs.e_beta));   /* |e|, not eq */
         float sp_a = (spd_obs > 0.0f) ? spd_obs : -spd_obs;
         float w_a  = (s_obs.omega_e > 0.0f) ? s_obs.omega_e : -s_obs.omega_e;
         float eq_exp = w_a * MOTOR_KE_V_RAD_S;   /* what a locked observer owes */
@@ -1388,13 +1389,16 @@ static void task_foc(uint32_t t_pick)
              * instead: a healthy observer reports an eq close to what its own
              * speed implies. */
             {
-                float eq_a2  = (s_obs.eq > 0.0f) ? s_obs.eq : -s_obs.eq;
+                /* |e| = sqrt(ea^2 + eb^2): invariant to the angle error, unlike
+                 * eq (which collapses at 90 deg and made this criterion flaky). */
+                float e_mag  = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
+                                     (s_obs.e_beta  * s_obs.e_beta));
                 float w_a2   = (s_obs.omega_e > 0.0f) ? s_obs.omega_e : -s_obs.omega_e;
                 float eq_ex2 = w_a2 * MOTOR_KE_V_RAD_S;
 
-                if ((eq_a2 > OBS_E_MIN_V) &&
+                if ((e_mag > OBS_E_MIN_V) &&
                     (fabsf(rpm_if) > HO_MIN_RPM) &&
-                    ((eq_ex2 < 0.05f) || (eq_a2 > (0.50f * eq_ex2)))) {
+                    ((eq_ex2 < 0.05f) || (e_mag > (0.50f * eq_ex2)))) {
                 if (s_ho_cnt < 0xFFFFu) {
                     s_ho_cnt++;
                 }
