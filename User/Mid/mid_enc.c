@@ -17,6 +17,7 @@
   */
 
 #include "mid_enc.h"
+#include <math.h>
 #include "alg_pll.h"
 #include "board_cfg.h"
 #include "bsp_flash.h"
@@ -40,6 +41,8 @@ static mid_enc_t s_enc;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
+static uint16_t  s_pll_stall_cnt;   /* S10 lost-lock guard */
+static uint32_t  s_pll_resets;      /* how often the guard fired */
 static alg_pll_t s_pll;          /* S8.1 speed observer */
 static uint8_t   s_spd_src;      /* 0 window, 1 PLL */
 static float     s_win_rpm;      /* window estimator, for comparison */
@@ -313,6 +316,28 @@ void mid_enc_update(void)
             if (s_acc_cyc >= (SYS_CORE_CLK_HZ / 1000u) * ENC_SPD_WINDOW_MS) {
                 float dt_s = (float)s_acc_cyc / (float)SYS_CORE_CLK_HZ;
                 s_win_rpm = ((s_acc_mech / dt_s) * (60.0f / ENC_TWO_PI));
+                /* S10 lost-lock guard: the window is trustworthy about
+                 * "is it moving", the PLL is not (a type-2 loop free-runs
+                 * once the true speed is outside its capture range; measured
+                 * on hardware: rotor stationary, reading stuck at the clamp
+                 * for ~6 s). */
+                if ((fabsf(s_win_rpm) < ENC_PLL_STALL_WIN_RPM) &&
+                    (fabsf(s_enc.spd_rpm) > ENC_PLL_STALL_PLL_RPM)) {
+                    if (s_pll_stall_cnt < 0xFFFFu) {
+                        s_pll_stall_cnt++;
+                    }
+                    if (s_pll_stall_cnt >=
+                        (uint16_t)(ENC_PLL_STALL_MS / ENC_SPD_WINDOW_MS)) {
+                        s_pll_stall_cnt = 0u;
+                        s_pll_resets++;
+                        s_pll.omega = 0.0f;      /* drop the integrator */
+                        alg_pll_reset(&s_pll, elec);
+                        s_enc.spd_hz  = 0.0f;
+                        s_enc.spd_rpm = 0.0f;
+                    }
+                } else {
+                    s_pll_stall_cnt = 0u;
+                }
 
                 /* The window estimator only drives the outputs when it is
                  * the selected source; the PLL keeps them otherwise. */
@@ -358,6 +383,11 @@ uint8_t mid_enc_pll_locked(void)
 void mid_enc_set_pll_bw(float wn_hz, float zeta)
 {
     alg_pll_set_bw(&s_pll, wn_hz, zeta);
+}
+
+uint32_t mid_enc_pll_resets(void)
+{
+    return s_pll_resets;
 }
 
 float mid_enc_win_rpm(void)
