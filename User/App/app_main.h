@@ -47,6 +47,10 @@ typedef struct {
 /* Start the alignment; requires the bridge running (start first).
  * Returns 0 on success, 2 = not running, 3 = already aligning. */
 uint8_t app_align_start(void);
+/* Open-loop pre-position: hold a fixed vector at theta=0 for
+ * ALIGN_OL_MS and stop. Needs no encoder (S10.0c).
+ * Returns 0 = OK, 2 = not running, 3 = already aligning. */
+uint8_t app_align_ol_start(void);
 const app_align_t *app_align_info(void);
 
 /* Control mode */

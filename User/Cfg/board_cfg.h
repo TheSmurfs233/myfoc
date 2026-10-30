@@ -298,6 +298,12 @@ extern "C" {
 #define ALIGN_I_MAX_A           1.28f   /* abort above this (ADC range 1.32 A) */
 #define ALIGN_TIMEOUT_MS        18000u  /* two sweeps plus margin */
 
+/* S10.0c: open-loop pre-position ("align ol"). Holds a fixed vector at
+ * theta = 0 while ramping the magnitude, so the rotor is pulled to a
+ * known electrical position without any encoder feedback. 500 ms is
+ * long enough for the rotor to stop swinging after the step. */
+#define ALIGN_OL_MS             500u
+
 /* VOFA+ waveform: number of channels per frame (FireWater: 5 bytes each).
  *   0 time, 1..3 duties, 4..6 phase currents, 7..9 encoder,
  *   10 id, 11 iq, 12 id_ref, 13 iq_ref, 14 vd, 15 vq, 16 vbus,

@@ -127,7 +127,8 @@ static float         s_align_fwd_sum;   /* forward sweep only (rad)       */
 static uint32_t      s_align_fwd_n;
 static float         s_align_rev_sum;   /* reverse sweep only (rad)       */
 static uint32_t      s_align_rev_n;
-static uint32_t      s_align_frames0;   /* encoder frame count at start   */
+static uint32_t      s_align_frames0;
+static uint8_t       s_align_ol;      /* 1 = open-loop pre-position */   /* encoder frame count at start   */
 
 /* ---- where each control step lands inside the 50us PWM period ---- */
 static app_phase_info_t s_phase;
@@ -425,6 +426,39 @@ static void task_align(void)
         align_finish(2u);
         return;
     }
+    /* ---- S10.0c: open-loop pre-position (no encoder involved) ----
+     * Hold theta = 0 while the magnitude ramps: the rotor is pulled onto
+     * that axis and stays there. Nothing to measure, so this runs without
+     * any encoder frame and without the sweep. ---- */
+    if (s_align_ol != 0u) {
+        if (el < (uint32_t)ALIGN_OL_MS) {
+            m = ALIGN_M_START +
+                ((ALIGN_M_MAX - ALIGN_M_START) * (float)el / (float)ALIGN_OL_MS);
+
+            alg_svpwm(0.0f, m, duty);
+            for (i = 0u; i < 3u; i++) {
+                if (duty[i] < 0.0f) { duty[i] = 0.0f; }
+                if (duty[i] > 1.0f) { duty[i] = 1.0f; }
+            }
+            bsp_pwm_set_duty(duty[0], duty[1], duty[2]);
+            s_align.m = m;
+            return;
+        }
+
+        /* The rotor now sits on the theta = 0 axis. For an encoder-less
+         * drive that is all we need: the forced frame is in phase by
+         * construction. If an encoder is fitted, capture its zero too so the
+         * encoder path benefits from the same procedure. */
+        s_align_ol = 0u;
+        if (mid_enc_info()->valid != 0u) {
+            (void)mid_enc_zero();
+            log_printf("OK align ol done, encoder zero captured");
+        } else {
+            log_printf("OK align ol done, rotor at theta=0 (no encoder)");
+        }
+        align_finish(0u);
+        return;
+    }
 
     /* ---- magnitude ramp ---- */
     if (el < (uint32_t)ALIGN_RAMP_MS) {
@@ -535,16 +569,20 @@ static void task_align(void)
 }
 uint8_t app_align_start(void)
 {
-    if (s_st.state != APP_ST_RUN) {
-        return 2u;                       /* start the bridge first */
-    }
+    /* Order matters: starting an alignment already moves the state away
+     * from RUN, so checking the state first would make "already aligning"
+     * (3) unreachable. */
     if (s_align.active != 0u) {
         return 3u;
+    }
+    if (s_st.state != APP_ST_RUN) {
+        return 2u;                       /* start the bridge first */
     }
 
     /* The vector itself is written by task_align every frame (it ramps), so
      * nothing to do here beyond arming the state. */
 
+    s_align_ol         = 0u;
     s_align.active     = 1u;
     s_align.done       = 0u;
     s_align.fail       = 0u;
@@ -559,6 +597,36 @@ uint8_t app_align_start(void)
     s_align_frames0    = mid_enc_info()->frames;
     s_align.err_deg    = 0.0f;
     s_align.n          = 0u;
+
+    s_st.state = APP_ST_ALIGN;
+    return 0u;
+}
+
+uint8_t app_align_ol_start(void)
+{
+    /* Order matters: starting an alignment already moves the state away
+     * from RUN, so checking the state first would make "already aligning"
+     * (3) unreachable. */
+    if (s_align.active != 0u) {
+        return 3u;
+    }
+    if (s_st.state != APP_ST_RUN) {
+        return 2u;                       /* start the bridge first */
+    }
+
+    /* Arm the same state as the sweep alignment, plus the open-loop flag:
+     * task_align then holds theta = 0 and skips the sweep and every
+     * encoder check (S10.0c). */
+    s_align_ol         = 1u;
+    s_align.active     = 1u;
+    s_align.done       = 0u;
+    s_align.fail       = 0u;
+    s_align.zero_deg   = mid_enc_info()->zero_deg;
+    s_align.err_deg    = 0.0f;
+    s_align.n          = 0u;
+    s_align.m          = 0.0f;
+    s_align_t0         = HAL_GetTick();
+    s_align_frames0    = mid_enc_info()->frames;
 
     s_st.state = APP_ST_ALIGN;
     return 0u;

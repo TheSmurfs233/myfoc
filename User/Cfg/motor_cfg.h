@@ -34,7 +34,9 @@
 
 /* The board's shunt chain saturates at +-1.32 A, so the usable current is
  * capped there no matter what the motor could take. */
-#define MOTOR_I_RATED_MA        1000        /* continuous target, mA       */
+#define MOTOR_I_RATED_MA        1000        /* nameplate continuous rating, mA;
+                                             * documentation only - the actual
+                                             * clamp is MOTOR_I_MAX_MA below */
 #define MOTOR_I_MAX_MA          1200        /* current-loop clamp, mA      */
 #define MOTOR_I_TRIP_MA         1280        /* over-current trip, mA       */
 

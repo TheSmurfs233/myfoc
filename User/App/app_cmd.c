@@ -156,7 +156,7 @@ static void print_help(void)
     log_printf(" trig           benchmark the sin/cos back end (LUT or CORDIC)");
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
     log_printf(" enc [zero|dir|raw]  MT6701 angle, zero capture, direction");
-    log_printf(" align          force-align the rotor and store the electrical zero");
+    log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -878,7 +878,16 @@ static float   s_pll_zeta = PLL_ZETA;
     }
     /* ---------------- align ----------------- */
     else if (strcmp(tok[0], "align") == 0) {
-        switch (app_align_start()) {
+        uint8_t rc;
+
+        /* "align ol" = open-loop pre-position, works without an encoder. */
+        if ((n >= 2u) && (strcmp(tok[1], "ol") == 0)) {
+            rc = app_align_ol_start();
+        } else {
+            rc = app_align_start();
+        }
+
+        switch (rc) {
         case 0u:
             log_printf("OK align started, hold theta=0");
             break;

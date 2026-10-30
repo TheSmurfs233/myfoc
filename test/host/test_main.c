@@ -2287,6 +2287,20 @@ static void test_cmd(void)
     }
     section_end();
 
+    section("app: align ol arms the open-loop pre-position");
+    {
+        T(app_align_ol_start() == 2u);        /* not running yet */
+        cmd_feed("mode 2\r\n");
+        cmd_feed("start\r\n");
+        T(app_status()->state == APP_ST_RUN);
+        T(app_align_ol_start() == 0u);
+        T(app_status()->state == APP_ST_ALIGN);
+        T(app_align_ol_start() == 3u);        /* already aligning */
+        cmd_feed("stop\r\n");
+        T(app_status()->state == APP_ST_IDLE);
+        cmd_feed("mode 0\r\n");
+    }
+    section_end();
     section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the
