@@ -111,6 +111,36 @@ for p in DOCS:
         if len(t) > 2 and not t.endswith('|'):
             err('%s:%d table row not closed with |' % (rel(p), n))
 
+# ------------------------------------------- 3b. table column consistency
+CELL_SPLIT = re.compile(r'(?<!\\)\|')
+
+
+def table_cells(line):
+    parts = CELL_SPLIT.split(line)
+    # a well formed row starts and ends with '|' -> first/last parts empty
+    return len(parts) - 2
+
+
+for p in DOCS:
+    in_fence = False
+    header = None
+    for n, line in enumerate(read(p).splitlines(), 1):
+        t = line.strip()
+        if t.startswith('```'):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not t.startswith('|'):
+            header = None
+            continue
+        cols = table_cells(t)
+        if header is None:
+            header = cols
+        elif cols != header:
+            err('%s:%d table has %d cells, header has %d (unescaped | ?)'
+                % (rel(p), n, cols, header))
+
 # ------------------------------------------------------- 4/5. accept script
 help_count = None
 wave_ch = None

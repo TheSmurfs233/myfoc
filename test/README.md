@@ -179,7 +179,7 @@ python test/doc_check.py        # 退出码 0 = 通过，1 = 有硬错误
 |---|---|
 | 乱码 | 任何文档含 U+FFFD |
 | 源码非 ASCII | `User/**/*.[ch]` 必须是纯 ASCII（Keil 用 GBK 编码） |
-| 表格截断 | 以 `|` 开头但不以 `|` 结尾的行（代码块内除外） |
+| 表格截断 | 以 `\|` 开头但不以 `\|` 结尾的行（代码块内除外） |
 | help 漂移 | `app_cmd.c` 的 help 行数 vs `accept/s1_accept.py` |
 | 波形漂移 | `WAVE_CH` vs accept 脚本期望 |
 | 版本漂移 | `FW_BUILD_ID` vs `docs/01` 的 S8 行 + `docs/README` 基线 |
