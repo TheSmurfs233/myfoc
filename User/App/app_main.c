@@ -1362,8 +1362,12 @@ static void task_foc(uint32_t t_pick)
 
     /* ---- S10.4: open-loop I/f ----
      * The forced frame supplies both the angle and the current vector; the
-     * speed loop must stay out of the way (no meaningful feedback yet). */
-    if (s_if.run != 0u) {
+     * speed loop must stay out of the way (no meaningful feedback yet).
+     * Hard priority: once the observer owns the drive (s_sfoc) the ramp must
+     * not touch the current references any more - this block runs AFTER the
+     * speed loop and would silently win (measured 06:00: the I/f resurrected
+     * itself and pinned the drive at its 600 rpm drag ceiling). */
+    if ((s_if.run != 0u) && (s_sfoc == 0u)) {
         alg_if_step(&s_if, FOC_TS);
 
         /* ---- S10.5: hand-over evaluation ----

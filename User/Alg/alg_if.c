@@ -60,8 +60,11 @@ void alg_if_set_target(alg_if_t *v, float f_hz)
         return;
     }
 
+    /* Only move the target. Do NOT touch run: this used to set it to 1, so any
+     * later call resurrected a ramp that the hand-over had already stopped
+     * (measured 06:00: the I/f came back and hijacked the current references,
+     * pinning the drive at 600 rpm with the drag current). */
     v->f_target = f_hz;
-    v->run      = 1u;
 }
 
 void alg_if_stop(alg_if_t *v)
