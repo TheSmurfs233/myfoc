@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             141u
+#define FW_BUILD_ID             142u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -312,7 +312,7 @@ extern "C" {
  * degrees apart), so a slow ramp lets the rotor slide into sync instead of
  * fighting its starting position. */
 #define IF_ACC_HZ_S            30.0f    /* frequency ramp, Hz/s        */
-#define IF_I_AMP_A             0.40f    /* forced vector amplitude, A  */
+#define IF_I_AMP_A             0.60f    /* forced vector amplitude, A  */
 #define IF_F_MIN_HZ            2.0f     /* starting electrical Hz      */
 /* d-axis pre-align before the drag: pulls the rotor to a known angle so
  * the 180 deg ambiguity becomes a deterministic start (measured: without
