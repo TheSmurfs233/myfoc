@@ -976,9 +976,9 @@ static float   s_pll_zeta = PLL_ZETA;
             log_printf("sfoc %s, blend %.2f, dth %.1f deg",
                        (hs < 4u) ? st[hs] : "?", (double)app_ho_w(),
                        (double)(app_ho_dth() * 57.29577951308232f));
-            log_printf(" obs w %.0f rpm, enc %.0f rpm, eq %.2f V",
+            log_printf(" obs w %.0f rpm, enc %.0f rpm, eq %.2f V, locked %u",
                        (double)(o->omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS),
-                       (double)e->spd_rpm, (double)o->eq);
+                       (double)e->spd_rpm, (double)o->eq, (unsigned)o->pll.locked);
         }
     }
 

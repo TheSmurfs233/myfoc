@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             143u
+#define FW_BUILD_ID             144u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -325,8 +325,12 @@ extern "C" {
  * Conditions (all must hold continuously):
  *   |theta_obs - theta_if| < HO_ANGLE_DEG,  |eq| > OBS_E_MIN_V
  * then the angle is blended over HO_BLEND_MS so the switch is not a step. */
-#define HO_ANGLE_DEG            25.0f
-#define HO_ANGLE_RAD            (HO_ANGLE_DEG * 0.0174532925199433f)
+/* NOTE: the criterion must NOT be "observer agrees with the I/f frame".
+ * Measured (#143): the observer tracked the encoder to 5.9 deg while
+ * |theta_obs - theta_if| sat at 54..89 deg, because the drag has a load angle of
+ * ~74 deg - the forced frame is not where the rotor is. Judge the observer
+ * instead: enough back-EMF, enough speed, PLL locked. */
+#define HO_MIN_RPM              250.0f  /* below this the back-EMF is too weak */
 #define HO_HOLD_MS              20u
 #define HO_HOLD_CNT             (HO_HOLD_MS * 20u)   /* control ticks at 20 kHz */
 #define HO_BLEND_MS             100u

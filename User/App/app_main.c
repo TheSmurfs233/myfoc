@@ -1322,11 +1322,20 @@ static void task_foc(uint32_t t_pick)
         if ((s_ho_state == 1u) && (s_if.phase == 1u)) {
             float de = s_obs.theta_out - s_if.theta;
 
+            float rpm_if;
+
             while (de >  3.14159265f) { de -= 6.283185307179586f; }
             while (de < -3.14159265f) { de += 6.283185307179586f; }
-            s_ho_dth = (de > 0.0f) ? de : -de;
+            s_ho_dth = (de > 0.0f) ? de : -de;     /* diagnostics only */
 
-            if ((s_ho_dth < HO_ANGLE_RAD) && (fabsf(s_obs.eq) > OBS_E_MIN_V)) {
+            /* Judge the observer, not its agreement with the forced frame:
+             * the drag always runs at a load angle (measured ~74 deg), so the
+             * two angles are never close. */
+            rpm_if = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
+
+            if ((fabsf(s_obs.eq) > OBS_E_MIN_V) &&
+                (fabsf(rpm_if) > HO_MIN_RPM) &&
+                (s_obs.pll.locked != 0u)) {
                 if (s_ho_cnt < 0xFFFFu) {
                     s_ho_cnt++;
                 }
