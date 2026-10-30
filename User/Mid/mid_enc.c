@@ -41,7 +41,7 @@ static mid_enc_t s_enc;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
-static uint32_t  s_pll_resets;      /* how often the guard fired */
+static uint32_t  s_pll_clears;      /* mid_enc_pll_clear() calls  */
 static alg_pll_t s_pll;          /* S8.1 speed observer */
 static uint8_t   s_spd_src;      /* 0 window, 1 PLL */
 static float     s_win_rpm;      /* window estimator, for comparison */
@@ -371,6 +371,7 @@ void mid_enc_set_pll_bw(float wn_hz, float zeta)
  * of the PLL and fired during normal acceleration. */
 void mid_enc_pll_clear(void)
 {
+    s_pll_clears++;
     s_pll.omega = 0.0f;
     alg_pll_reset(&s_pll, s_enc.elec_deg * (ENC_TWO_PI / 360.0f));
     s_enc.spd_hz  = 0.0f;
@@ -381,9 +382,9 @@ void mid_enc_pll_clear(void)
     s_acc_cyc  = 0u;
 }
 
-uint32_t mid_enc_pll_resets(void)
+uint32_t mid_enc_pll_clears(void)
 {
-    return s_pll_resets;
+    return s_pll_clears;
 }
 
 float mid_enc_win_rpm(void)

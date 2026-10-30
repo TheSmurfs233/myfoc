@@ -1075,8 +1075,8 @@ static float   s_pll_zeta = PLL_ZETA;
                        (double)e->zero_deg,
                        (unsigned)e->dir,
                        (e->src == ENC_SRC_FLASH) ? "flash" : "default");
-            log_printf(" guard = %u pll resets (lost-lock clear)",
-                       (unsigned)mid_enc_pll_resets());
+            log_printf(" pll clears = %u (on stop/fault)",
+                       (unsigned)mid_enc_pll_clears());
         }
     }
     /* ---------------- cur ----------------- */
