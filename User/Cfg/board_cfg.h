@@ -373,7 +373,7 @@ extern "C" {
 #define SPD_LPF_LO_K            0.30f    /* no filter below LO         */
 #define SPD_LPF_HI_K            0.10f    /* ~8 Hz above HI             */
 #define RIP_WINDOW_MS           500u    /* ripple measurement window */
-#define SPD_RPM_MAX             MOTOR_RPM_MAX     /* target limit */
+#define SPD_RPM_MAX             MOTOR_RPM_MAX_F   /* target limit */
 /* sstep: settle first, then step the speed reference and record. */
 #define SSTEP_SETTLE_MS         300u
 #define SSTEP_SETTLE_MAX_MS     10000u   /* give up waiting after this */

@@ -2287,6 +2287,30 @@ static void test_cmd(void)
     }
     section_end();
 
+    section("cfg: motor parameter golden values");
+    {
+        /* Deliberate snapshots. If a refactor changes one of these the
+         * test fails, so the change has to be reviewed on purpose: the
+         * S10.0 refactor silently broke the acceleration feedforward
+         * (used J/KE_elec instead of J/Kt, i.e. 7x too large) while the
+         * firmware still built with 0 errors and 0 warnings. */
+        T(ENC_POLE_PAIRS == 7u);
+        T(FOC_K_EMF > 0.00412f && FOC_K_EMF < 0.00414f);
+        T(FOC_L_H > 0.00049f && FOC_L_H < 0.00051f);
+        T(FOC_KP > 2.99f && FOC_KP < 3.01f);
+        T(FOC_KI > 10999.0f && FOC_KI < 11001.0f);
+        T(SPD_KP > 0.0059f && SPD_KP < 0.0061f);
+        T(SPD_KI > 0.079f && SPD_KI < 0.081f);
+        T(FOC_I_MAX_A > 1.19f && FOC_I_MAX_A < 1.21f);
+        T(FOC_I_TRIP_A > 1.27f && FOC_I_TRIP_A < 1.29f);
+        T(SPD_RPM_MAX > 1999.0f && SPD_RPM_MAX < 2001.0f);
+        /* Kt(SI) = KE per mechanical rad/s = KE_elec * pole pairs */
+        T(MOTOR_KT_NM_A > 0.028f && MOTOR_KT_NM_A < 0.030f);
+        /* the value that bit us: must stay near 3.1e-3, never 2.2e-2 */
+        T(SPD_FF_ACC > 0.0028f && SPD_FF_ACC < 0.0034f);
+    }
+    section_end();
+
     section("alg_pll: locks onto a constant speed");
     {
         alg_pll_t p;
