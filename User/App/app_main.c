@@ -1381,18 +1381,30 @@ static void task_foc(uint32_t t_pick)
              * two angles are never close. */
             rpm_if = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
 
-            if ((fabsf(s_obs.eq) > OBS_E_MIN_V) &&
-                (fabsf(rpm_if) > HO_MIN_RPM) &&
-                (s_obs.pll.locked != 0u)) {
+            /* Do NOT gate on pll.locked: it is |err| < 0.15 rad on the
+             * instantaneous error, which ripples with the current at 20 kHz
+             * and flips 0/1 (measured: 3/3 hand-overs stuck in "watching"
+             * with the motor already at 399 rpm). Use the consistency ratio
+             * instead: a healthy observer reports an eq close to what its own
+             * speed implies. */
+            {
+                float eq_a2  = (s_obs.eq > 0.0f) ? s_obs.eq : -s_obs.eq;
+                float w_a2   = (s_obs.omega_e > 0.0f) ? s_obs.omega_e : -s_obs.omega_e;
+                float eq_ex2 = w_a2 * MOTOR_KE_V_RAD_S;
+
+                if ((eq_a2 > OBS_E_MIN_V) &&
+                    (fabsf(rpm_if) > HO_MIN_RPM) &&
+                    ((eq_ex2 < 0.05f) || (eq_a2 > (0.50f * eq_ex2)))) {
                 if (s_ho_cnt < 0xFFFFu) {
                     s_ho_cnt++;
                 }
-                if (s_ho_cnt >= (uint16_t)HO_HOLD_CNT) {
-                    s_ho_state = 2u;
-                    s_ho_w     = 0.0f;
+                    if (s_ho_cnt >= (uint16_t)HO_HOLD_CNT) {
+                        s_ho_state = 2u;
+                        s_ho_w     = 0.0f;
+                    }
+                } else {
+                    s_ho_cnt = 0u;
                 }
-            } else {
-                s_ho_cnt = 0u;
             }
         } else if (s_ho_state == 2u) {
             s_ho_w += FOC_TS / HO_BLEND_S;
