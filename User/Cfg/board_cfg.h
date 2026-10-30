@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             132u
+#define FW_BUILD_ID             133u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -313,6 +313,17 @@ extern "C" {
 #define OBS_LPF_HZ              1500.0f  /* back-EMF low pass         */
 #define OBS_PLL_WN_HZ           80.0f    /* observer PLL bandwidth     */
 #define OBS_W_MAX_RADS          (2000.0f * 0.10472f * 7.0f)  /* 2000 rpm elec */
+/* S10.2 calibration, measured on hardware (#132, 500..1800 rpm):
+ *   comp 2 (retard) with delay 0 and a -3.6 deg trim gives
+ *   2.33 / 1.88 / 1.18 / 0.09 deg of angle error at
+ *   500 / 800 / 1200 / 1800 rpm.  Without compensation the error
+ *   grows 7.3 -> 11.9 deg because the v/i sampling timing rotates
+ *   the estimated back-EMF (it is NOT the low pass: removing the
+ *   filter made it worse, 16.1 deg).
+ *   The trim is a per motor/board calibration; re-measure after a swap. */
+#define OBS_COMP_MODE           2u      /* 0 off, 1 advance, 2 retard */
+#define OBS_DELAY_US            0.0f    /* extra delay for the comp   */
+#define OBS_TRIM_DEG            (-3.6f) /* constant angle correction  */
 
 /* VOFA+ waveform: number of channels per frame (FireWater: 5 bytes each).
  *   0 time, 1..3 duties, 4..6 phase currents, 7..9 encoder,

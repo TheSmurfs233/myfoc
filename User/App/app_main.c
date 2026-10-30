@@ -237,6 +237,11 @@ void app_init(void)
     alg_obs_init(&s_obs, MOTOR_R_OHM, MOTOR_L_H, OBS_LPF_HZ,
                   OBS_PLL_WN_HZ, OBS_W_MAX_RADS);
     s_obs_on = 0u;
+
+    /* S10.2: calibration measured on hardware, see board_cfg.h. */
+    s_obs.comp      = OBS_COMP_MODE;
+    s_obs.delay_s   = OBS_DELAY_US * 0.000001f;
+    s_obs.theta_off = OBS_TRIM_DEG * 0.0174532925199433f;
     s_st.uptime_ms    = 0u;
     s_st.state        = APP_ST_INIT;
     s_st.mode         = CTRL_IDLE;
