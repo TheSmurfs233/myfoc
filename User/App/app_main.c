@@ -716,7 +716,9 @@ uint8_t app_stop(void)
 {
     /* S10: a free-running PLL must not survive the transition. */
     mid_enc_pll_clear();
-    s_spd_lp = 0.0f;
+    s_sfoc     = 0u;
+    s_ho_state = 0u;
+    s_spd_lp   = 0.0f;
 
     alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
     alg_foc_reset(&s_foc);
@@ -1881,6 +1883,22 @@ static void sstep_task(uint32_t now)
 }
 
 /* S7.6: speed and bus-voltage protections, evaluated once per millisecond. */
+/* Speed source for the protections: the encoder is the ground truth when it
+ * is alive; in true encoder-less operation fall back to the observer (else the
+ * stall judge would see 0 rpm and trip immediately). */
+static float prot_speed_rpm(void)
+{
+    const mid_enc_t *e = mid_enc_info();
+
+    if (e->valid != 0u) {
+        return e->spd_rpm;
+    }
+    if (s_sfoc != 0u) {
+        return s_obs.omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS;
+    }
+    return 0.0f;
+}
+
 static void prot_check_1ms(uint32_t now)
 {
     const mid_enc_t *e = mid_enc_info();
@@ -1898,7 +1916,7 @@ static void prot_check_1ms(uint32_t now)
     /* Grace window: the first milliseconds after start are not representative
      * (the bus sags while the gate drivers come up, the speed estimate is
      * still empty). */
-    s_spd_lp += (PROT_STALL_LP_K * (e->spd_rpm - s_spd_lp));
+    s_spd_lp += (PROT_STALL_LP_K * (prot_speed_rpm() - s_spd_lp));
 
     if ((uint32_t)(now - s_prot_start_ms) < (uint32_t)PROT_GRACE_MS) {
         s_prot_ov_ms = 0u;
@@ -1908,7 +1926,7 @@ static void prot_check_1ms(uint32_t now)
         return;
     }
 
-    spd  = e->spd_rpm;
+    spd  = prot_speed_rpm();
     vbus = bsp_vbus_volts();
 
     /* (the stall judge low-pass lives just above, before the grace check) */
