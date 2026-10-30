@@ -59,6 +59,7 @@ static uint8_t   s_sfoc;      /* 1 = sensorless: angle and speed from the observ
 static uint8_t   s_ho_state;   /* 0 idle, 1 watching, 2 blending, 3 done */
 static uint16_t  s_ho_cnt;
 static float     s_ho_w;       /* blend weight 0..1 */
+static uint16_t  s_lost_ms;      /* loss-of-lock debounce (1 kHz ticks) */
 static float     s_if_rpm_tgt;  /* rpm requested by sfoc go */
 static float     s_ho_dth;     /* |theta_obs - theta_if|, rad */
 
@@ -1295,6 +1296,31 @@ static void task_foc(uint32_t t_pick)
         }
     }
 
+    /* ---- S10.6: loss of lock --------------------------------------
+     * A locked observer cannot report a speed with no back-EMF. When it
+     * does (measured: eq 0.0 V while claiming 400 rpm) the drive is in a
+     * false equilibrium: the rotor is held still by a frozen angle while
+     * the speed loop keeps pushing. Detect and drop out. */
+    if (s_sfoc != 0u) {
+        float spd_obs = s_obs.omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS;
+        float eq_a = (s_obs.eq > 0.0f) ? s_obs.eq : -s_obs.eq;
+        float sp_a = (spd_obs > 0.0f) ? spd_obs : -spd_obs;
+
+        if ((eq_a < HO_LOST_EQ_V) && (sp_a > HO_LOST_MIN_RPM)) {
+            if (s_lost_ms < 0xFFFFu) {
+                s_lost_ms++;
+            }
+            if (s_lost_ms >= (uint16_t)HO_LOST_MS) {
+                s_lost_ms = 0u;
+                app_sfoc_abort();
+            }
+        } else {
+            s_lost_ms = 0u;
+        }
+    } else {
+        s_lost_ms = 0u;
+    }
+
     /* ---- S7.3 speed loop: 1 kHz, drives iq_ref (d stays at zero) ---- */
     if (s_spd.on != 0u) {
         s_spd_div++;
@@ -1631,6 +1657,17 @@ void app_if_set_acc(float hz_s)
 }
 
 /* ---- S10.5 hand-over ---- */
+/* Drop out of sensorless safely: release the current and report. */
+void app_sfoc_abort(void)
+{
+    s_sfoc     = 0u;
+    s_ho_state = 0u;
+    app_spd_off();
+    app_if_stop();
+    log_printf("ERR obs lost lock (eq %.2f V), drive released",
+               (double)s_obs.eq);
+}
+
 uint8_t app_sfoc_on(void)   { return s_sfoc; }
 
 uint8_t app_ho_state(void) { return s_ho_state; }

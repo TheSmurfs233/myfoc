@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             150u
+#define FW_BUILD_ID             151u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -336,6 +336,12 @@ extern "C" {
  * ~74 deg - the forced frame is not where the rotor is. Judge the observer
  * instead: enough back-EMF, enough speed, PLL locked. */
 #define HO_MIN_RPM              250.0f  /* below this the back-EMF is too weak */
+/* Loss of lock: the observer claims a speed while its back-EMF says
+ * there is none. At 400 rpm |eq| is about 1.06 V, so 0.25 V is a
+ * clear "signal gone" with 4x margin. */
+#define HO_LOST_EQ_V            0.25f
+#define HO_LOST_MIN_RPM         100.0f
+#define HO_LOST_MS              100u
 #define HO_HOLD_MS              20u
 #define HO_HOLD_CNT             (HO_HOLD_MS * 20u)   /* control ticks at 20 kHz */
 #define HO_BLEND_MS             100u

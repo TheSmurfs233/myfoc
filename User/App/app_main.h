@@ -77,7 +77,8 @@ float    app_if_amp(void);
 /* ---- S10.5 hand-over ---- */
 void     app_ho_reset(void);      /* back to idle */
 void     app_ho_arm(void);
-uint8_t  app_sfoc_on(void);     /* 1 = angle+speed from the observer */        /* start watching for the hand-over */
+uint8_t  app_sfoc_on(void);
+void     app_sfoc_abort(void);  /* drop out of sensorless safely */     /* 1 = angle+speed from the observer */        /* start watching for the hand-over */
 uint8_t  app_ho_state(void);      /* 0 idle, 1 watching, 2 blend, 3 done */
 float    app_ho_w(void);          /* blend weight 0..1 */
 float    app_ho_dth(void);        /* |theta_obs - theta_if|, rad */
