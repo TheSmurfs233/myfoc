@@ -124,7 +124,7 @@ eq = −eα·sinθ̂ + eβ·cosθ̂ = ωe·ψf·cos(θ̂ − θe)
 |---|---|
 | 新增 `User/Cfg/motor_cfg.h` | `motor_cfg_t`：`pp`、`r_ohm`、`l_h`、`ke`、`j`、`i_rated`、`i_max`、`rpm_max`，以及一组默认值宏 |
 | 改造 `board_cfg.h` | 现有 `FOC_*`/`ENC_POLE_PAIRS` 改为引用 `motor_cfg` 里的字段，**换电机只改一处** |
-| 改造 `align` | ✅ **已完成**：`align ol` 保持 theta=0 升幅值 500 ms，跳过扫频与编码器检查 |
+| 改造 `align` | ✅ **已完成**：`align ol` 保持 theta=0 升幅值 500 ms，跳过扫频与编码器检查；实测重复性 0.02 机械度。**注意：不写编码器零位**（对齐位置比扫频零位差约 5 度电角度，见 docs/00 2026-10-31 真机验证） |
 | 新增 `sident` | 半自动辨识：预定位 → 测 R（固定电流读 vq/iq）→ 测 L（d 轴电压阶跃看 di/dt）→ 打印建议值 |
 | 新增 `obs health` | 打印 `id/iq` 比值、`eq` 与 `ω̂·ψf` 的偏差（**无编码器时唯一的在线判据**） |
 | **统一角度/转速访问口** | 新增 `app_theta_rad()` / `app_speed_rpm()`：按"角度源"返回编码器或观测器的值；`task_foc`、速度环、6 类保护**全部改走这两个口** |

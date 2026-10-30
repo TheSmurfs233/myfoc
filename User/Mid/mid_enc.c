@@ -370,6 +370,16 @@ const mid_enc_t *mid_enc_info(void)
     return &s_enc;   /* single writer, no shadow copy */
 }
 
+void mid_enc_clear_errs(void)
+{
+    /* Only the error counters: "frames" keeps advancing so the enc
+     * command can still show an error rate after a clear. */
+    s_enc.crc_errs = 0u;
+    s_enc.ovr      = 0u;
+    s_enc.late     = 0u;
+    s_enc.io_errs  = 0u;
+}
+
 uint8_t mid_enc_zero(void)
 {
     uint8_t f[3];

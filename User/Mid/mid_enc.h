@@ -57,6 +57,9 @@ float   mid_enc_pll_rpm(void);      /* PLL result regardless of source */
 uint8_t mid_enc_pll_locked(void);
 void    mid_enc_set_pll_bw(float wn_hz, float zeta);
 
+/* Reset crc/ovr/late/io error counters (frames keeps running). */
+void mid_enc_clear_errs(void);
+
 uint8_t mid_enc_zero(void);
 
 /* Set the electrical zero to an explicit mechanical angle (degrees).

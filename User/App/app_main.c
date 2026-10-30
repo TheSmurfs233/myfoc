@@ -445,14 +445,22 @@ static void task_align(void)
             return;
         }
 
-        /* The rotor now sits on the theta = 0 axis. For an encoder-less
-         * drive that is all we need: the forced frame is in phase by
-         * construction. If an encoder is fitted, capture its zero too so the
-         * encoder path benefits from the same procedure. */
+        /* The rotor now sits on the theta = 0 axis, which is all an
+         * encoder-less drive needs: the forced frame is in phase by
+         * construction.
+         *
+         * Deliberately NOT writing the encoder zero here: measured on
+         * hardware (#128) the aligned position is ~5 deg electrical short
+         * of the vector (cogging/friction equilibrium), while the S5 sweep
+         * zero is accurate to +-5.3 deg. Storing the aligned position moved
+         * zero_deg 131.91 -> 234.01 and would have made the encoder path
+         * worse. Report the offset instead - the I/f hand-over needs it. */
         s_align_ol = 0u;
         if (mid_enc_info()->valid != 0u) {
-            (void)mid_enc_zero();
-            log_printf("OK align ol done, encoder zero captured");
+            float off = mid_enc_info()->elec_deg;
+
+            log_printf("OK align ol done, forced frame offset %.1f deg (elec)",
+                       (double)off);
         } else {
             log_printf("OK align ol done, rotor at theta=0 (no encoder)");
         }
@@ -1385,6 +1393,11 @@ void app_counters_clear(void)
     s_st.wave_frames = 0u;
     s_st.wave_drop   = 0u;
     s_st.rx_drop     = 0u;
+
+    /* Also reset the encoder error counters: "clr" is documented as
+     * "clear counters", and without this the CRC count could not be
+     * measured over a window (it kept the historical total). */
+    mid_enc_clear_errs();
 }
 
 const app_status_t *app_status(void)
