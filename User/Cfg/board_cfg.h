@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             134u
+#define FW_BUILD_ID             135u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -452,13 +452,15 @@ extern "C" {
  * outside its capture range, so it free-runs and keeps reporting the old
  * speed (measured: rotor stationary, reading stuck at the 2000 rpm clamp
  * for ~6 s -> stall protection could never fire).
- * The window estimator is unambiguous about motion, so treat
- *   |window| < 15 rpm  AND  |PLL| > 300 rpm  for 50 ms
- * as "lost lock" and clear the integrator. 15 rpm sits well below the
- * 30 rpm minimum operating speed, so normal tracking never triggers it. */
-#define ENC_PLL_STALL_WIN_RPM   15.0f
+ *
+ * Detection: the mechanical angle must stay put for ENC_PLL_STALL_MS while
+ * the PLL still claims more than ENC_PLL_STALL_PLL_RPM; then the integrator
+ * is cleared. The encoder is 14 bit (0.022 deg/LSB) and the 30 rpm minimum
+ * speed moves 0.18 deg per ms, so ENC_STILL_TOL_DEG = 0.2 deg (about 9 LSB)
+ * is "no real motion" without ever triggering on normal running. */
 #define ENC_PLL_STALL_PLL_RPM   300.0f
 #define ENC_PLL_STALL_MS        50u
+#define ENC_STILL_TOL_DEG       0.20f
 
 
 /* ==========================================================================

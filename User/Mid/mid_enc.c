@@ -41,7 +41,7 @@ static mid_enc_t s_enc;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
-static uint16_t  s_pll_stall_cnt;   /* S10 lost-lock guard */
+static uint32_t  s_still_cyc;      /* time the angle has not moved */
 static uint32_t  s_pll_resets;      /* how often the guard fired */
 static alg_pll_t s_pll;          /* S8.1 speed observer */
 static uint8_t   s_spd_src;      /* 0 window, 1 PLL */
@@ -179,6 +179,7 @@ void mid_enc_init(void)
                  ENC_TWO_PI * (SPD_RPM_MAX / 60.0f) * (float)ENC_POLE_PAIRS);
     s_spd_src = ENC_SPD_DEFAULT;
     s_win_rpm = 0.0f;
+    s_still_cyc = 0u;
 }
 
 void mid_enc_update(void)
@@ -296,11 +297,14 @@ void mid_enc_update(void)
                  * the next call covers this movement (and so a window never
                  * mixes deltas that have no elapsed time behind them). */
             } else if (dt > (2u * SYS_CORE_CLK_HZ / 1000u)) {
-                /* A large gap (after "enc zero" or a stalled loop) would
-                 * alias the wrap: restart the window instead. */
+                /* A real gap (after "enc zero" or a stalled loop) would
+                 * alias the wrap: restart the window instead. Clearing
+                 * s_win_rpm matters: leaving the old value behind made the
+                 * lost-lock guard read a frozen speed forever. */
                 s_acc_mech = 0.0f;
                 s_acc_elec = 0.0f;
                 s_acc_cyc  = 0u;
+                s_win_rpm  = 0.0f;
                 s_t_prev    = now;
                 s_prev_mech = mech;
                 s_prev_elec = elec;
@@ -312,32 +316,34 @@ void mid_enc_update(void)
                 s_prev_mech = mech;
                 s_prev_elec = elec;
             }
+            /* ---- S10 lost-lock guard ----
+             * A type-2 PLL free-runs once the true speed is outside its
+             * capture range: measured on hardware, the rotor sat still while
+             * the reading stayed at the 2000 rpm clamp for ~6 s, which would
+             * also disable the stall protection (|spd| < 30 never met).
+             *
+             * The check runs on every update (not inside the 10 ms window):
+             * in IDLE the updates are ~2 ms apart, every one looks like a gap
+             * to the accumulator, so a guard living there would never run. */
+            if ((dt != 0u) && (fabsf(dm) < (ENC_STILL_TOL_DEG * (ENC_TWO_PI / 360.0f)))) {
+                s_still_cyc += dt;
+            } else {
+                s_still_cyc = 0u;
+            }
+
+            if ((s_still_cyc >= ((SYS_CORE_CLK_HZ / 1000u) * ENC_PLL_STALL_MS)) &&
+                (fabsf(s_enc.spd_rpm) > ENC_PLL_STALL_PLL_RPM)) {
+                s_still_cyc = 0u;
+                s_pll_resets++;
+                s_pll.omega = 0.0f;          /* drop the integrator */
+                alg_pll_reset(&s_pll, elec);
+                s_enc.spd_hz  = 0.0f;
+                s_enc.spd_rpm = 0.0f;
+            }
 
             if (s_acc_cyc >= (SYS_CORE_CLK_HZ / 1000u) * ENC_SPD_WINDOW_MS) {
                 float dt_s = (float)s_acc_cyc / (float)SYS_CORE_CLK_HZ;
                 s_win_rpm = ((s_acc_mech / dt_s) * (60.0f / ENC_TWO_PI));
-                /* S10 lost-lock guard: the window is trustworthy about
-                 * "is it moving", the PLL is not (a type-2 loop free-runs
-                 * once the true speed is outside its capture range; measured
-                 * on hardware: rotor stationary, reading stuck at the clamp
-                 * for ~6 s). */
-                if ((fabsf(s_win_rpm) < ENC_PLL_STALL_WIN_RPM) &&
-                    (fabsf(s_enc.spd_rpm) > ENC_PLL_STALL_PLL_RPM)) {
-                    if (s_pll_stall_cnt < 0xFFFFu) {
-                        s_pll_stall_cnt++;
-                    }
-                    if (s_pll_stall_cnt >=
-                        (uint16_t)(ENC_PLL_STALL_MS / ENC_SPD_WINDOW_MS)) {
-                        s_pll_stall_cnt = 0u;
-                        s_pll_resets++;
-                        s_pll.omega = 0.0f;      /* drop the integrator */
-                        alg_pll_reset(&s_pll, elec);
-                        s_enc.spd_hz  = 0.0f;
-                        s_enc.spd_rpm = 0.0f;
-                    }
-                } else {
-                    s_pll_stall_cnt = 0u;
-                }
 
                 /* The window estimator only drives the outputs when it is
                  * the selected source; the PLL keeps them otherwise. */
