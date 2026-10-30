@@ -57,6 +57,9 @@ uint8_t  app_obs_set_on(uint8_t on);   /* 0 = off, 1 = running       */
 uint8_t  app_obs_get_on(void);
 uint8_t  app_obs_set_bw(float wn_hz);  /* 0 = OK, 1 = rejected       */
 void     app_obs_set_rl(float r_ohm, float l_h);
+uint8_t  app_obs_set_lpf(float hz);    /* 0 = low pass off          */
+void     app_obs_set_comp(uint8_t on); /* phase-lead compensation   */
+void     app_obs_set_delay(float us);  /* extra delay for the comp  */
 void     app_obs_reset(float theta);
 const void *app_obs_info(void);        /* cast to const alg_obs_t*   */
 const app_align_t *app_align_info(void);

@@ -33,8 +33,11 @@ typedef struct {
     /* configuration */
     float   r_ohm;
     float   l_h;
-    float   lpf_k;      /* first order coefficient, 1.0 = no filtering */
+    float   lpf_hz;     /* back-EMF low pass cutoff, 0 = off            */
+    float   lpf_k;      /* derived: time constant, s                    */
     float   w_max;      /* speed clamp for the PLL, rad/s              */
+    uint8_t comp;       /* 1 = phase-lead compensation on               */
+    float   delay_s;    /* extra delay folded into the compensation     */
 
     /* state */
     alg_pll_t pll;

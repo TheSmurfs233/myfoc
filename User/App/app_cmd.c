@@ -158,7 +158,7 @@ static void print_help(void)
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
     log_printf(" enc [zero [deg]|dir|raw]  angle, zero capture/restore, direction");
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
-    log_printf(" obs [on|off|bw|r|l]   back-EMF observer, shadow mode (S10.1)");
+    log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -916,6 +916,33 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("OK obs bw = %.1f Hz", (double)hz);
             } else {
                 log_printf("ERR usage=obs bw <5..500 Hz>");
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "lpf") == 0)) {
+            float hz;
+
+            if (parse_num(tok[2], &hz) && (app_obs_set_lpf(hz) == 0u)) {
+                log_printf("OK obs lpf = %.0f Hz (%s)", (double)hz,
+                           (hz > 0.0f) ? "on" : "off");
+            } else {
+                log_printf("ERR usage=obs lpf <0..8000 Hz>");
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "comp") == 0)) {
+            uint32_t on;
+
+            if (parse_u32(tok[2], &on) && (on <= 1u)) {
+                app_obs_set_comp((uint8_t)on);
+                log_printf("OK obs comp = %u", (unsigned)on);
+            } else {
+                log_printf("ERR usage=obs comp <0|1>");
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "delay") == 0)) {
+            float us;
+
+            if (parse_num(tok[2], &us) && (us >= 0.0f) && (us <= 500.0f)) {
+                app_obs_set_delay(us);
+                log_printf("OK obs delay = %.0f us", (double)us);
+            } else {
+                log_printf("ERR usage=obs delay <0..500 us>");
             }
         } else if ((n >= 3u) && ((strcmp(tok[1], "r") == 0) ||
                                  (strcmp(tok[1], "l") == 0))) {

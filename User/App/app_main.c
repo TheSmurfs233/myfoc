@@ -1444,6 +1444,28 @@ uint8_t app_obs_set_bw(float wn_hz)
     return 0u;
 }
 
+uint8_t app_obs_set_lpf(float hz)
+{
+    if ((hz < 0.0f) || (hz > 8000.0f)) {
+        return 1u;
+    }
+    s_obs.lpf_hz = hz;
+    s_obs.lpf_k  = (hz > 0.0f) ? (1.0f / (6.283185307179586f * hz)) : 0.0f;
+    return 0u;
+}
+
+void app_obs_set_comp(uint8_t on)
+{
+    s_obs.comp = (on != 0u) ? 1u : 0u;
+}
+
+void app_obs_set_delay(float us)
+{
+    if ((us >= 0.0f) && (us <= 500.0f)) {
+        s_obs.delay_s = us * 0.000001f;
+    }
+}
+
 void app_obs_set_rl(float r_ohm, float l_h)
 {
     if (r_ohm > 0.0f) { s_obs.r_ohm = r_ohm; }

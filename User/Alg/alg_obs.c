@@ -31,11 +31,10 @@ void alg_obs_init(alg_obs_t *o, float r_ohm, float l_h,
     /* First order low pass: k = 1 - exp(-2*pi*fc*ts). The caller passes the
      * cutoff in Hz and we fold it into a per-sample coefficient at step time,
      * so keep it as a time constant here. */
-    if (lpf_hz > 0.0f) {
-        o->lpf_k = 1.0f / (OBS_TWO_PI * lpf_hz);
-    } else {
-        o->lpf_k = 0.0f;        /* 0 = filtering disabled */
-    }
+    o->lpf_hz   = (lpf_hz > 0.0f) ? lpf_hz : 0.0f;
+    o->lpf_k    = (o->lpf_hz > 0.0f) ? (1.0f / (OBS_TWO_PI * o->lpf_hz)) : 0.0f;
+    o->comp     = 0u;
+    o->delay_s  = 50.0e-6f;     /* one PWM period, the usual culprit */
 
     alg_pll_init(&o->pll, pll_wn_hz, 0.707f, o->w_max);
     alg_obs_reset(o, 0.0f);
@@ -93,8 +92,8 @@ void alg_obs_step(alg_obs_t *o, float v_alpha, float v_beta,
     eb = v_beta  - (o->r_ohm * i_beta)  - (o->l_h * di_b);
 
     /* ---- low pass (time constant form, recomputed per sample) ---- */
-    if (o->lpf_k > 0.0f) {
-        alpha = (o->lpf_k > ts) ? (ts / o->lpf_k) : 1.0f;
+    if (o->lpf_hz > 0.0f) {
+        alpha = ts / o->lpf_k;
         if (alpha > 1.0f) { alpha = 1.0f; }
 
         o->e_alpha += alpha * (ea - o->e_alpha);
@@ -102,6 +101,30 @@ void alg_obs_step(alg_obs_t *o, float v_alpha, float v_beta,
     } else {
         o->e_alpha = ea;
         o->e_beta  = eb;
+    }
+
+    /* ---- S10.2: phase-lead compensation ----
+     * The low pass (and the one-period control delay) rotate the measured
+     * back-EMF backwards by atan(w_e/w_lpf) + w_e*delay. For small angles
+     * the rotation is applied directly to e with cos/sin of that angle.
+     * Measured on hardware (#130): the angle error grew 7.1 -> 11.9 deg
+     * from 300 to 1800 rpm, i.e. the bias is speed dependent, which is what
+     * a phase lag looks like. */
+    if ((o->comp != 0u) && (o->lpf_hz > 0.0f)) {
+        float w  = (o->omega_e > 0.0f) ? o->omega_e : -o->omega_e;
+        float ph = (w / (OBS_TWO_PI * o->lpf_hz)) + (w * o->delay_s);
+        float cph;
+        float sph;
+        float ea2;
+        float eb2;
+
+        if (ph > 0.35f) { ph = 0.35f; }     /* ~20 deg, keep it sane */
+        mid_trig_cos_sin(ph, &cph, &sph);
+
+        ea2 = (o->e_alpha * cph) - (o->e_beta * sph);
+        eb2 = (o->e_alpha * sph) + (o->e_beta * cph);
+        o->e_alpha = ea2;
+        o->e_beta  = eb2;
     }
 
     /* ---- rotate into the estimated frame ----
