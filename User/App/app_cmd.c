@@ -964,9 +964,24 @@ static float   s_pll_zeta = PLL_ZETA;
                  * condition below, so it started the I/f even when the
                  * drive was already sensorless (visible as "if run 1"
                  * in the diag line). */
-                /* Already sensorless: this is a speed change, not a restart. */
-                (void)app_spd_set(rpm);
-                log_printf("OK sfoc go %.0f rpm (already sensorless)", (double)rpm);
+                /* Already sensorless: this is a speed change, not a restart.
+                 * Report the result - printing OK while the target was
+                 * rejected is worse than an error message. */
+                {
+                    uint8_t rc2 = app_spd_set(rpm);
+
+                    if (rc2 == 0u) {
+                        log_printf("OK sfoc go %.0f rpm (already sensorless)",
+                                   (double)rpm);
+                    } else if (rc2 == 2u) {
+                        log_printf("ERR start first");
+                    } else if (rc2 == 4u) {
+                        log_printf("ERR mode 2 first (FOC)");
+                    } else {
+                        log_printf("ERR speed too high, |rpm| <= %d",
+                                   (int)SPD_RPM_MAX);
+                    }
+                }
             } else if (app_if_start(rpm) != 0u) {
                 log_printf("ERR start first");
             } else {
