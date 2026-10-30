@@ -929,11 +929,20 @@ static float   s_pll_zeta = PLL_ZETA;
         } else if ((n >= 3u) && (strcmp(tok[1], "comp") == 0)) {
             uint32_t on;
 
-            if (parse_u32(tok[2], &on) && (on <= 1u)) {
+            if (parse_u32(tok[2], &on) && (on <= 2u)) {
                 app_obs_set_comp((uint8_t)on);
                 log_printf("OK obs comp = %u", (unsigned)on);
             } else {
-                log_printf("ERR usage=obs comp <0|1>");
+                log_printf("ERR usage=obs comp <0|1|2>");
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "trim") == 0)) {
+            float deg;
+
+            if (parse_num(tok[2], &deg) && (deg > -180.0f) && (deg < 180.0f)) {
+                app_obs_set_trim(deg);
+                log_printf("OK obs trim = %.2f deg", (double)deg);
+            } else {
+                log_printf("ERR usage=obs trim <-180..180>");
             }
         } else if ((n >= 3u) && (strcmp(tok[1], "delay") == 0)) {
             float us;
@@ -964,7 +973,7 @@ static float   s_pll_zeta = PLL_ZETA;
             float err_deg;
             float rpm;
 
-            err_deg = o->theta - (e->elec_deg * 0.0174532925199433f);
+            err_deg = o->theta_out - (e->elec_deg * 0.0174532925199433f);
             while (err_deg >  3.14159265f) { err_deg -= 6.283185307179586f; }
             while (err_deg < -3.14159265f) { err_deg += 6.283185307179586f; }
             err_deg *= 57.29577951308232f;
@@ -977,7 +986,7 @@ static float   s_pll_zeta = PLL_ZETA;
                        (double)o->e_alpha, (double)o->e_beta);
             log_printf(" ed %.3f V, eq %.3f V, theta %.1f deg, w %.0f rpm",
                        (double)o->ed, (double)o->eq,
-                       (double)(o->theta * 57.29577951308232f), (double)rpm);
+                       (double)(o->theta_out * 57.29577951308232f), (double)rpm);
             log_printf(" enc elec %.1f deg, angle err %.2f deg, locked %u",
                        (double)e->elec_deg, (double)err_deg,
                        (unsigned)o->pll.locked);

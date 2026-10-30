@@ -1454,9 +1454,14 @@ uint8_t app_obs_set_lpf(float hz)
     return 0u;
 }
 
-void app_obs_set_comp(uint8_t on)
+void app_obs_set_comp(uint8_t mode)
 {
-    s_obs.comp = (on != 0u) ? 1u : 0u;
+    s_obs.comp = (mode <= 2u) ? mode : 0u;
+}
+
+void app_obs_set_trim(float deg)
+{
+    s_obs.theta_off = deg * 0.0174532925199433f;
 }
 
 void app_obs_set_delay(float us)
@@ -1914,9 +1919,9 @@ static void task_wave(uint32_t now)
     /* S10.1: back-EMF observer against the encoder. ch19 = estimated
      * electrical angle, ch20 = wrapped difference to the encoder (deg).
      * If ch20 stays small the observer is good enough to take over. */
-    ch[19] = s_obs.theta * 57.29577951308232f;
+    ch[19] = s_obs.theta_out * 57.29577951308232f;
     {
-        float de = s_obs.theta - (mid_enc_info()->elec_deg * 0.0174532925199433f);
+        float de = s_obs.theta_out - (mid_enc_info()->elec_deg * 0.0174532925199433f);
 
         while (de >  3.14159265f) { de -= 6.283185307179586f; }
         while (de < -3.14159265f) { de += 6.283185307179586f; }

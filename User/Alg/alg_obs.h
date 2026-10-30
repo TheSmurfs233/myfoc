@@ -36,7 +36,9 @@ typedef struct {
     float   lpf_hz;     /* back-EMF low pass cutoff, 0 = off            */
     float   lpf_k;      /* derived: time constant, s                    */
     float   w_max;      /* speed clamp for the PLL, rad/s              */
-    uint8_t comp;       /* 1 = phase-lead compensation on               */
+    uint8_t comp;       /* 0 off, 1 advance (+ph), 2 retard (-ph)        */
+    float   theta_off;  /* static trim, rad (calibrates a constant bias) */
+    float   theta_out;  /* theta + trim, wrapped: what the app should use */
     float   delay_s;    /* extra delay folded into the compensation     */
 
     /* state */

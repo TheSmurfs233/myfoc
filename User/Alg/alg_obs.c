@@ -33,8 +33,10 @@ void alg_obs_init(alg_obs_t *o, float r_ohm, float l_h,
      * so keep it as a time constant here. */
     o->lpf_hz   = (lpf_hz > 0.0f) ? lpf_hz : 0.0f;
     o->lpf_k    = (o->lpf_hz > 0.0f) ? (1.0f / (OBS_TWO_PI * o->lpf_hz)) : 0.0f;
-    o->comp     = 0u;
-    o->delay_s  = 50.0e-6f;     /* one PWM period, the usual culprit */
+    o->comp      = 0u;
+    o->delay_s   = 50.0e-6f;    /* one PWM period, the usual culprit */
+    o->theta_off = 0.0f;
+    o->theta_out = 0.0f;
 
     alg_pll_init(&o->pll, pll_wn_hz, 0.707f, o->w_max);
     alg_obs_reset(o, 0.0f);
@@ -68,6 +70,8 @@ void alg_obs_step(alg_obs_t *o, float v_alpha, float v_beta,
     float c;
     float s;
     float alpha;    /* filter coefficient for this step */
+    float ea_r;     /* back-EMF used for ed/eq (compensated copy) */
+    float eb_r;
     float err;
 
     if ((o == 0) || (ts <= 0.0f)) {
@@ -103,28 +107,33 @@ void alg_obs_step(alg_obs_t *o, float v_alpha, float v_beta,
         o->e_beta  = eb;
     }
 
-    /* ---- S10.2: phase-lead compensation ----
-     * The low pass (and the one-period control delay) rotate the measured
-     * back-EMF backwards by atan(w_e/w_lpf) + w_e*delay. For small angles
-     * the rotation is applied directly to e with cos/sin of that angle.
-     * Measured on hardware (#130): the angle error grew 7.1 -> 11.9 deg
-     * from 300 to 1800 rpm, i.e. the bias is speed dependent, which is what
-     * a phase lag looks like. */
+    /* ---- phase compensation (S10.2) ----
+     * The low pass and the control delay rotate the measured back-EMF, so
+     * the lock point sits ph away from the truth:
+     *   ph = w_e/(2*pi*fc) + w_e*delay
+     *
+     * IMPORTANT: rotate a COPY. The first version rotated e_alpha/e_beta in
+     * place, i.e. the filter state, so the rotation compounded on every
+     * sample and the error exploded (measured: 11.9 -> 37 deg).
+     *
+     * comp: 0 = off, 1 = advance, 2 = retard. The direction is a physical
+     * question, not a matter of taste, so it stays switchable until the
+     * hardware experiment says which way is right. */
+    ea_r = o->e_alpha;
+    eb_r = o->e_beta;
+
     if ((o->comp != 0u) && (o->lpf_hz > 0.0f)) {
         float w  = (o->omega_e > 0.0f) ? o->omega_e : -o->omega_e;
         float ph = (w / (OBS_TWO_PI * o->lpf_hz)) + (w * o->delay_s);
         float cph;
         float sph;
-        float ea2;
-        float eb2;
 
         if (ph > 0.35f) { ph = 0.35f; }     /* ~20 deg, keep it sane */
-        mid_trig_cos_sin(ph, &cph, &sph);
+        if (o->comp == 2u) { ph = -ph; }
 
-        ea2 = (o->e_alpha * cph) - (o->e_beta * sph);
-        eb2 = (o->e_alpha * sph) + (o->e_beta * cph);
-        o->e_alpha = ea2;
-        o->e_beta  = eb2;
+        mid_trig_cos_sin(ph, &cph, &sph);
+        ea_r = (o->e_alpha * cph) - (o->e_beta * sph);
+        eb_r = (o->e_alpha * sph) + (o->e_beta * cph);
     }
 
     /* ---- rotate into the estimated frame ----
@@ -133,12 +142,19 @@ void alg_obs_step(alg_obs_t *o, float v_alpha, float v_beta,
      * The PLL drives ed to zero; eq is the amplitude, useful as a health
      * indicator (should be ~omega_e * flux once locked). */
     mid_trig_cos_sin(o->theta, &c, &s);
-    o->ed = ( o->e_alpha * c) + (o->e_beta * s);
-    o->eq = (-o->e_alpha * s) + (o->e_beta * c);
+    o->ed = ( ea_r * c) + (eb_r * s);
+    o->eq = (-ea_r * s) + (eb_r * c);
 
     /* Sign: ed > 0 means theta_hat leads theta, so the loop needs -ed. */
     err = -o->ed;
 
     o->omega_e = alg_pll_step_err(&o->pll, err, ts);
     o->theta   = o->pll.theta;
+
+    /* Calibrated output: the PLL runs in "true" coordinates, the trim
+     * absorbs a constant offset (see the 7 deg intercept measured in
+     * S10.2). Control and display use this one. */
+    o->theta_out = o->theta + o->theta_off;
+    while (o->theta_out >= OBS_TWO_PI) { o->theta_out -= OBS_TWO_PI; }
+    while (o->theta_out <  0.0f)       { o->theta_out += OBS_TWO_PI; }
 }
