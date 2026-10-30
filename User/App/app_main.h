@@ -70,6 +70,8 @@ const void *app_obs_info(void);        /* cast to const alg_obs_t*   */
 uint8_t  app_if_start(float rpm);
 void     app_if_stop(void);
 uint8_t  app_if_on(void);
+uint8_t  app_if_phase(void);
+uint16_t app_ho_cnt(void);
 float    app_if_theta(void);
 float    app_if_freq_hz(void);
 float    app_if_amp(void);

@@ -1705,6 +1705,9 @@ void    app_ho_arm(void)
     s_ho_w     = 0.0f;
 }
 
+uint8_t app_if_phase(void) { return s_if.phase; }
+uint16_t app_ho_cnt(void)   { return s_ho_cnt; }
+
 uint8_t app_if_on(void)      { return s_if.run; }
 float   app_if_theta(void)   { return s_if.theta; }
 float   app_if_freq_hz(void) { return s_if.f_hz; }
