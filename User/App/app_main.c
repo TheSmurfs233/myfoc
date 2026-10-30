@@ -1377,6 +1377,8 @@ static void task_foc(uint32_t t_pick)
                 rpm_tgt = (s_if_rpm_tgt != 0.0f)
                         ? s_if_rpm_tgt
                         : (s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS));
+                if (rpm_tgt >  SPD_RPM_MAX) { rpm_tgt =  SPD_RPM_MAX; }
+                if (rpm_tgt < -SPD_RPM_MAX) { rpm_tgt = -SPD_RPM_MAX; }
                 s_sfoc  = 1u;
                 alg_if_stop(&s_if);
                 app_spd_set(rpm_tgt);
@@ -1571,20 +1573,24 @@ void app_counters_clear(void)
 uint8_t app_if_start(float rpm)
 {
     float f_hz;
+    float rpm_drag;
 
     if (s_st.state != APP_ST_RUN) {
         return 2u;
     }
-    if (rpm >  IF_RPM_MAX) { rpm =  IF_RPM_MAX; }
-    if (rpm < -IF_RPM_MAX) { rpm = -IF_RPM_MAX; }
+
+    /* Keep the caller's request for the closed loop, but only drag the rotor
+     * up to IF_RPM_MAX: the hand-over happens at 250 rpm, so pulling the I/f
+     * further is pointless. The clamp used to leak into the speed-loop target
+     * (measured 05:14: 'sfoc go 1400' became target 600). */
+    s_if_rpm_tgt = rpm;
+
+    rpm_drag = rpm;
+    if (rpm_drag >  IF_RPM_MAX) { rpm_drag =  IF_RPM_MAX; }
+    if (rpm_drag < -IF_RPM_MAX) { rpm_drag = -IF_RPM_MAX; }
 
     /* Mechanical rpm -> electrical Hz. */
-    f_hz = (rpm / 60.0f) * (float)ENC_POLE_PAIRS;
-
-    /* Remember the request: the hand-over fires as soon as the ramp passes
-     * the 250 rpm criterion, so the instantaneous frequency is NOT the
-     * speed the caller asked for (measured 05:08: asked 1400, held 280). */
-    s_if_rpm_tgt = rpm;
+    f_hz = (rpm_drag / 60.0f) * (float)ENC_POLE_PAIRS;
 
     app_spd_off();                  /* no speed loop during a forced run */
 
