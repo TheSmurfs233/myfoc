@@ -959,12 +959,16 @@ static float   s_pll_zeta = PLL_ZETA;
 
             if (!parse_num(tok[2], &rpm)) {
                 log_printf("ERR usage=sfoc go <rpm>");
-            } else if (app_if_start(rpm) != 0u) {
-                log_printf("ERR start first");
             } else if (app_sfoc_on() != 0u) {
+                /* Ask THIS first: app_if_start() used to sit in the
+                 * condition below, so it started the I/f even when the
+                 * drive was already sensorless (visible as "if run 1"
+                 * in the diag line). */
                 /* Already sensorless: this is a speed change, not a restart. */
                 (void)app_spd_set(rpm);
                 log_printf("OK sfoc go %.0f rpm (already sensorless)", (double)rpm);
+            } else if (app_if_start(rpm) != 0u) {
+                log_printf("ERR start first");
             } else {
                 /* S10.6: do not make "obs on" a separate ritual - the
                  * hand-over needs it, so switch it on here. */
