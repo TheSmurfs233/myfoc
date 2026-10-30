@@ -32,16 +32,24 @@ typedef struct {
     float   acc_hz_s;   /* frequency ramp, Hz per s                     */
     float   i_amp;      /* current amplitude for the forced vector, A   */
     float   f_min_hz;   /* below this the ramp holds, Hz                */
+    float   align_s;    /* d-axis pre-align time, s (0 = none)          */
 
     /* state */
     float   theta;      /* forced electrical angle, rad [0, 2pi)        */
     float   f_hz;       /* current electrical frequency, Hz             */
     float   f_target;   /* target electrical frequency, Hz              */
     float   i_now;      /* current amplitude after its own ramp, A      */
+    float   t_align;    /* time spent in the pre-align phase, s         */
+    uint8_t phase;      /* 0 = d-axis align (no torque), 1 = drag       */
     uint8_t run;
 } alg_if_t;
 
 void alg_if_init(alg_if_t *v, float acc_hz_s, float i_amp, float f_min_hz);
+
+/* Pre-align duration: the vector is held on the d axis (no torque) so the
+ * rotor is pulled to a known angle before the drag starts. This is what turns
+ * the 180 deg ambiguity into a deterministic start. 0 disables it. */
+void alg_if_set_align_time(alg_if_t *v, float seconds);
 
 /* Start from standstill: angle 0, frequency f_min_hz, amplitude 0 (so the
  * caller gets a soft ramp even if it forgets to do one itself). */

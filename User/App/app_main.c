@@ -242,6 +242,7 @@ void app_init(void)
 
     /* S10.4: open-loop I/f ramp (also configured on every start). */
     alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
+    alg_if_set_align_time(&s_if, IF_ALIGN_MS / 1000.0f);
 
     /* S10.2: calibration measured on hardware, see board_cfg.h. */
     s_obs.comp      = OBS_COMP_MODE;
@@ -1314,10 +1315,19 @@ static void task_foc(uint32_t t_pick)
          * (that is what align ol does) and produces no torque, so the rotor
          * would just sit there. Measured with id = i_amp on #138: frequency
          * ramped to 35 Hz, current 0.40 A, encoder 0 rpm. */
-        s_foc_info.id_ref  = 0.0f;
-        s_foc_info.iq_ref  = s_if.i_now;
-        id_ref             = 0.0f;
-        iq_ref             = s_if.i_now;
+        if (s_if.phase == 0u) {
+            /* Pre-align: d-axis, torque free (this is what "align ol" does). */
+            s_foc_info.id_ref = s_if.i_now;
+            s_foc_info.iq_ref = 0.0f;
+            id_ref = s_if.i_now;
+            iq_ref = 0.0f;
+        } else {
+            /* Drag: q axis, torque. */
+            s_foc_info.id_ref = 0.0f;
+            s_foc_info.iq_ref = s_if.i_now;
+            id_ref = 0.0f;
+            iq_ref = s_if.i_now;
+        }
         s_foc_info.spd_rpm = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
     }
 
@@ -1477,7 +1487,9 @@ uint8_t app_if_start(float rpm)
          * rotor out of sync at once (measured: 200 rpm -> 0 rpm). */
         alg_if_set_target(&s_if, f_hz);
     } else {
-        alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
+        /* Do NOT re-init here: that used to wipe the amplitude set by
+         * "if i" back to the default, which made a parameter sweep look
+         * like "the amplitude does not matter". */
         alg_if_start(&s_if);
         alg_if_set_target(&s_if, f_hz);
     }

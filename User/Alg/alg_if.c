@@ -25,7 +25,18 @@ void alg_if_init(alg_if_t *v, float acc_hz_s, float i_amp, float f_min_hz)
     v->f_hz     = v->f_min_hz;
     v->f_target = v->f_min_hz;
     v->i_now    = 0.0f;
+    v->t_align  = 0.0f;
+    v->phase    = 0u;
+    v->align_s  = 0.0f;
     v->run      = 0u;
+}
+
+void alg_if_set_align_time(alg_if_t *v, float seconds)
+{
+    if (v == 0) {
+        return;
+    }
+    v->align_s = (seconds > 0.0f) ? seconds : 0.0f;
 }
 
 void alg_if_start(alg_if_t *v)
@@ -38,6 +49,8 @@ void alg_if_start(alg_if_t *v)
     v->f_hz     = v->f_min_hz;
     v->f_target = v->f_min_hz;
     v->i_now    = 0.0f;         /* the caller sees a soft start by design */
+    v->t_align  = 0.0f;
+    v->phase    = (v->align_s > 0.0f) ? 0u : 1u;
     v->run      = 1u;
 }
 
@@ -57,9 +70,11 @@ void alg_if_stop(alg_if_t *v)
         return;
     }
 
-    v->run   = 0u;
-    v->i_now = 0.0f;
-    v->f_hz  = v->f_min_hz;
+    v->run     = 0u;
+    v->i_now   = 0.0f;
+    v->f_hz    = v->f_min_hz;
+    v->phase   = 0u;
+    v->t_align = 0.0f;
 }
 
 void alg_if_step(alg_if_t *v, float ts)
@@ -67,6 +82,24 @@ void alg_if_step(alg_if_t *v, float ts)
     float df;
 
     if ((v == 0) || (ts <= 0.0f) || (v->run == 0u)) {
+        return;
+    }
+
+    /* ---- d-axis pre-align: hold the angle, no frequency ramp yet ---- */
+    if (v->phase == 0u) {
+        v->t_align += ts;
+
+        /* amplitude ramps up (same slew), angle stays at 0 */
+        if (v->i_now < v->i_amp) {
+            v->i_now += v->i_amp * ts * 10.0f;
+            if (v->i_now > v->i_amp) { v->i_now = v->i_amp; }
+        }
+
+        if (v->t_align >= v->align_s) {
+            v->phase = 1u;
+            v->t_align = 0.0f;
+            v->f_hz = v->f_min_hz;
+        }
         return;
     }
 
