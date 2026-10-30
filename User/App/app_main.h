@@ -63,6 +63,16 @@ void     app_obs_set_trim(float deg);   /* static angle trim */
 void     app_obs_set_delay(float us);  /* extra delay for the comp  */
 void     app_obs_reset(float theta);
 const void *app_obs_info(void);        /* cast to const alg_obs_t*   */
+
+/* ---- S10.4 open-loop I/f startup ---- */
+/* Force the current vector at <rpm> mechanical (0 = hold position).
+ * Returns 0 = OK, 2 = not running (start the bridge first). */
+uint8_t  app_if_start(float rpm);
+void     app_if_stop(void);
+uint8_t  app_if_on(void);
+float    app_if_theta(void);
+float    app_if_freq_hz(void);
+float    app_if_amp(void);
 const app_align_t *app_align_info(void);
 
 /* Control mode */

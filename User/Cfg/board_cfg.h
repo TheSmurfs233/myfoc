@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             137u
+#define FW_BUILD_ID             138u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -303,6 +303,18 @@ extern "C" {
  * known electrical position without any encoder feedback. 500 ms is
  * long enough for the rotor to stop swinging after the step. */
 #define ALIGN_OL_MS             500u
+
+/* ==========================================================================
+ * S10.4: open-loop I/f startup
+ * ==========================================================================
+ * Start at a low electrical frequency and ramp slowly: open-loop alignment
+ * has a 180 deg ambiguity (measured: two stable positions 27.4 mechanical
+ * degrees apart), so a slow ramp lets the rotor slide into sync instead of
+ * fighting its starting position. */
+#define IF_ACC_HZ_S            30.0f    /* frequency ramp, Hz/s        */
+#define IF_I_AMP_A             0.40f    /* forced vector amplitude, A  */
+#define IF_F_MIN_HZ            2.0f     /* starting electrical Hz      */
+#define IF_RPM_MAX             600.0f   /* ceiling for the "if" command */
 
 /* ==========================================================================
  * S10.1: back-EMF observer (shadow mode)

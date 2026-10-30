@@ -23,6 +23,7 @@
 #include "alg_vf.h"
 #include "alg_foc.h"
 #include "alg_obs.h"
+#include "alg_if.h"
 #include "alg_spd.h"
 #include "bsp_adc.h"
 #include "bsp_vbus.h"
@@ -53,6 +54,7 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 /* ---- open-loop V/f (S4) ---- */
 static alg_vf_t      s_vf;
 static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
+static alg_if_t      s_if;       /* S10.4 open-loop ramp */
 static alg_obs_t     s_obs;      /* S10.1 shadow observer */
 static app_vf_info_t s_vf_info;
 
@@ -237,6 +239,9 @@ void app_init(void)
     alg_obs_init(&s_obs, MOTOR_R_OHM, MOTOR_L_H, OBS_LPF_HZ,
                   OBS_PLL_WN_HZ, OBS_W_MAX_RADS);
     s_obs_on = 0u;
+
+    /* S10.4: open-loop I/f ramp (also configured on every start). */
+    alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
 
     /* S10.2: calibration measured on hardware, see board_cfg.h. */
     s_obs.comp      = OBS_COMP_MODE;
@@ -1107,8 +1112,9 @@ static void task_foc(uint32_t t_pick)
     uint32_t t_comp;
     uint8_t  i;
 
-    /* No encoder frame yet: hold the zero vector rather than invent an angle. */
-    if (e->valid == 0u) {
+    /* No encoder frame yet: hold the zero vector rather than invent an angle.
+     * S10.4: unless I/f is driving, in which case the angle is ours. */
+    if ((e->valid == 0u) && (s_if.run == 0u)) {
         bsp_pwm_set_all_duty(PWM_START_DUTY);
         return;
     }
@@ -1117,7 +1123,7 @@ static void task_foc(uint32_t t_pick)
      * Using the bad-frame counter was wrong: while the encoder is healthy
      * that counter never changes, so the "stuck" timer fired 20 frames
      * after start (measured: false encoder fault at 1 ms). ---- */
-    {
+    if (s_if.run == 0u) {
         if (e->frames != s_prot_bad_seen) {
             s_prot_bad_seen = e->frames;
             s_prot_enc_cnt  = 0u;
@@ -1298,10 +1304,24 @@ static void task_foc(uint32_t t_pick)
         iq_ref *= k;
     }
 
+    /* ---- S10.4: open-loop I/f ----
+     * The forced frame supplies both the angle and the current vector; the
+     * speed loop must stay out of the way (no meaningful feedback yet). */
+    if (s_if.run != 0u) {
+        alg_if_step(&s_if, FOC_TS);
+        s_foc_info.id_ref  = s_if.i_now;
+        s_foc_info.iq_ref  = 0.0f;
+        id_ref             = s_if.i_now;
+        iq_ref             = 0.0f;
+        s_foc_info.spd_rpm = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
+    }
+
     /* S7.2: electrical angular speed for the feedforward, signed. */
     (void)alg_foc_step(&s_foc, cs->ia, cs->ib, cs->ic,
-                       e->elec_deg * 0.0174532925199433f,
-                       e->spd_hz * 6.283185307179586f,
+                       (s_if.run != 0u) ? s_if.theta
+                                        : (e->elec_deg * 0.0174532925199433f),
+                       (s_if.run != 0u) ? (6.283185307179586f * s_if.f_hz)
+                                        : (e->spd_hz * 6.283185307179586f),
                        id_ref, iq_ref, FOC_TS, duty);
 
     /* ---- S10.1: shadow observer (measures only, never drives) ---- */
@@ -1428,6 +1448,41 @@ void app_counters_clear(void)
 /* ------------------------------------------------------------------ */
 /* S10.1 back-EMF observer (shadow mode)                              */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* S10.4 open-loop I/f                                                */
+/* ------------------------------------------------------------------ */
+uint8_t app_if_start(float rpm)
+{
+    float f_hz;
+
+    if (s_st.state != APP_ST_RUN) {
+        return 2u;
+    }
+    if (rpm >  IF_RPM_MAX) { rpm =  IF_RPM_MAX; }
+    if (rpm < -IF_RPM_MAX) { rpm = -IF_RPM_MAX; }
+
+    /* Mechanical rpm -> electrical Hz. */
+    f_hz = (rpm / 60.0f) * (float)ENC_POLE_PAIRS;
+
+    app_spd_off();                  /* no speed loop during a forced run */
+    alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
+    alg_if_start(&s_if);
+    alg_if_set_target(&s_if, f_hz);
+    return 0u;
+}
+
+void app_if_stop(void)
+{
+    alg_if_stop(&s_if);
+    s_foc_info.id_ref = 0.0f;
+    s_foc_info.iq_ref = 0.0f;
+}
+
+uint8_t app_if_on(void)      { return s_if.run; }
+float   app_if_theta(void)   { return s_if.theta; }
+float   app_if_freq_hz(void) { return s_if.f_hz; }
+float   app_if_amp(void)     { return s_if.i_now; }
+
 uint8_t app_obs_set_on(uint8_t on)
 {
     s_obs_on = (on != 0u) ? 1u : 0u;

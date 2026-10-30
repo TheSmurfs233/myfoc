@@ -159,6 +159,7 @@ static void print_help(void)
     log_printf(" enc [zero [deg]|dir|raw]  angle, zero capture/restore, direction");
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
+    log_printf(" if <rpm|off>   open-loop I/f start (S10.4)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -901,6 +902,33 @@ static float   s_pll_zeta = PLL_ZETA;
             break;
         }
     }
+    /* ---------------- if (S10.4 open-loop startup) --------------- */
+    else if (strcmp(tok[0], "if") == 0) {
+        if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
+            app_if_stop();
+            log_printf("OK if off");
+        } else if (n >= 2u) {
+            float rpm;
+
+            if (!parse_num(tok[1], &rpm)) {
+                log_printf("ERR usage=if <rpm 0..600> | if off | if");
+            } else if (app_if_start(rpm) == 0u) {
+                log_printf("OK if %.0f rpm (%.1f Hz elec, ramp %.0f Hz/s)",
+                           (double)rpm, (double)app_if_freq_hz(),
+                           (double)IF_ACC_HZ_S);
+            } else {
+                log_printf("ERR start first");
+            }
+        } else {
+            log_printf("if %s, f %.2f Hz elec (%.0f rpm), i %.2f A, theta %.1f deg",
+                       (app_if_on() != 0u) ? "ON" : "off",
+                       (double)app_if_freq_hz(),
+                       (double)(app_if_freq_hz() * 60.0f / (float)ENC_POLE_PAIRS),
+                       (double)app_if_amp(),
+                       (double)(app_if_theta() * 57.29577951308232f));
+        }
+    }
+
     /* ---------------- obs (S10.1 back-EMF observer) --------------- */
     else if (strcmp(tok[0], "obs") == 0) {
         if ((n >= 2u) && (strcmp(tok[1], "on") == 0)) {

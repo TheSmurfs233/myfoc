@@ -39,6 +39,7 @@
 #include "alg_spd.h"
 #include "alg_pll.h"
 #include "alg_obs.h"
+#include "alg_if.h"
 #include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
@@ -2423,6 +2424,61 @@ static void test_cmd(void)
         T(fabsf(mid_enc_info()->spd_rpm - mid_enc_pll_rpm()) < 1.0f);
     }
     section_end();
+    section("alg_if: frequency and amplitude ramps");
+    {
+        alg_if_t v;
+        float ts = 1.0f / 20000.0f;
+        int i;
+
+        alg_if_init(&v, 30.0f, 0.4f, 2.0f);
+        alg_if_start(&v);
+        alg_if_set_target(&v, 35.0f);        /* ~300 rpm at 7 pole pairs */
+
+        for (i = 0; i < 2000; i++) {          /* 100 ms */
+            alg_if_step(&v, ts);
+        }
+        /* 30 Hz/s for 0.1 s = +3 Hz */
+        T(fabsf(v.f_hz - 5.0f) < 0.2f);
+        /* amplitude 0 -> 0.4 A in 100 ms */
+        T(fabsf(v.i_now - 0.4f) < 0.05f);
+
+        for (i = 0; i < 20000; i++) {         /* 1 s more */
+            alg_if_step(&v, ts);
+        }
+        T(fabsf(v.f_hz - 35.0f) < 0.1f);      /* reached the target */
+        T(v.theta >= 0.0f && v.theta < 6.2832f);
+
+        alg_if_stop(&v);
+        T(v.run == 0u);
+        T(fabsf(v.i_now) < 0.01f);
+    }
+    section_end();
+
+    section("alg_if: the angle advances at the commanded frequency");
+    {
+        alg_if_t v;
+        float ts = 1.0f / 20000.0f;
+        float th0;
+        int i;
+
+        alg_if_init(&v, 1000.0f, 0.4f, 10.0f);  /* fast ramp */
+        alg_if_start(&v);
+        alg_if_set_target(&v, 10.0f);           /* already there */
+        for (i = 0; i < 200; i++) { alg_if_step(&v, ts); }
+
+        th0 = v.theta;
+        for (i = 0; i < 2000; i++) { alg_if_step(&v, ts); }   /* 100 ms */
+        /* 10 Hz for 0.1 s = 1 electrical revolution */
+        {
+            float d = v.theta - th0;
+
+            while (d < -3.14159265f) { d += 6.283185307179586f; }
+            while (d >  3.14159265f) { d -= 6.283185307179586f; }
+            T(fabsf(d) < 0.2f);
+        }
+    }
+    section_end();
+
     section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the
