@@ -159,7 +159,7 @@ static void print_help(void)
     log_printf(" enc [zero [deg]|dir|raw]  angle, zero capture/restore, direction");
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
-    log_printf(" if <rpm|off>   open-loop I/f start (S10.4)");
+    log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -907,9 +907,26 @@ static float   s_pll_zeta = PLL_ZETA;
         if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
             app_if_stop();
             log_printf("OK if off");
+        } else if ((n >= 3u) && (strcmp(tok[1], "i") == 0)) {
+            float a;
+
+            if (parse_num(tok[2], &a) && (a > 0.05f) && (a <= FOC_I_MAX_A)) {
+                app_if_set_amp(a);
+                log_printf("OK if i = %.2f A", (double)a);
+            } else {
+                log_printf("ERR usage=if i <0.05..1.20 A>");
+            }
+        } else if ((n >= 3u) && (strcmp(tok[1], "acc") == 0)) {
+            float hz;
+
+            if (parse_num(tok[2], &hz) && (hz >= 2.0f) && (hz <= 300.0f)) {
+                app_if_set_acc(hz);
+                log_printf("OK if acc = %.0f Hz/s", (double)hz);
+            } else {
+                log_printf("ERR usage=if acc <2..300 Hz/s>");
+            }
         } else if (n >= 2u) {
             float rpm;
-
             if (!parse_num(tok[1], &rpm)) {
                 log_printf("ERR usage=if <rpm 0..600> | if off | if");
             } else if (app_if_start(rpm) == 0u) {

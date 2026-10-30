@@ -1470,9 +1470,17 @@ uint8_t app_if_start(float rpm)
     f_hz = (rpm / 60.0f) * (float)ENC_POLE_PAIRS;
 
     app_spd_off();                  /* no speed loop during a forced run */
-    alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
-    alg_if_start(&s_if);
-    alg_if_set_target(&s_if, f_hz);
+
+    if (s_if.run != 0u) {
+        /* Already dragging: only move the target. Resetting theta and the
+         * frequency here yanks the forced frame back to 0 and throws the
+         * rotor out of sync at once (measured: 200 rpm -> 0 rpm). */
+        alg_if_set_target(&s_if, f_hz);
+    } else {
+        alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
+        alg_if_start(&s_if);
+        alg_if_set_target(&s_if, f_hz);
+    }
     return 0u;
 }
 
@@ -1481,6 +1489,20 @@ void app_if_stop(void)
     alg_if_stop(&s_if);
     s_foc_info.id_ref = 0.0f;
     s_foc_info.iq_ref = 0.0f;
+}
+
+void app_if_set_amp(float a)
+{
+    if ((a > 0.05f) && (a <= FOC_I_MAX_A)) {
+        s_if.i_amp = a;
+    }
+}
+
+void app_if_set_acc(float hz_s)
+{
+    if ((hz_s >= 2.0f) && (hz_s <= 300.0f)) {
+        s_if.acc_hz_s = hz_s;
+    }
 }
 
 uint8_t app_if_on(void)      { return s_if.run; }

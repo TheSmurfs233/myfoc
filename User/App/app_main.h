@@ -73,6 +73,8 @@ uint8_t  app_if_on(void);
 float    app_if_theta(void);
 float    app_if_freq_hz(void);
 float    app_if_amp(void);
+void     app_if_set_amp(float a);      /* 0.05 .. I_MAX */
+void     app_if_set_acc(float hz_s);   /* 2 .. 300 Hz/s  */
 const app_align_t *app_align_info(void);
 
 /* Control mode */
