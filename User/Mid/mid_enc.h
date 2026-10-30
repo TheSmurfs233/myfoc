@@ -60,6 +60,9 @@ void    mid_enc_set_pll_bw(float wn_hz, float zeta);
 /* S10: how many times the lost-lock guard cleared the PLL. */
 uint32_t mid_enc_pll_resets(void);
 
+/* Drop the speed estimate (call when the bridge is disabled). */
+void     mid_enc_pll_clear(void);
+
 /* Reset crc/ovr/late/io error counters (frames keeps running). */
 void mid_enc_clear_errs(void);
 

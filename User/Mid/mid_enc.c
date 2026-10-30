@@ -41,7 +41,6 @@ static mid_enc_t s_enc;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
-static uint32_t  s_still_cyc;      /* time the angle has not moved */
 static uint32_t  s_pll_resets;      /* how often the guard fired */
 static alg_pll_t s_pll;          /* S8.1 speed observer */
 static uint8_t   s_spd_src;      /* 0 window, 1 PLL */
@@ -179,7 +178,6 @@ void mid_enc_init(void)
                  ENC_TWO_PI * (SPD_RPM_MAX / 60.0f) * (float)ENC_POLE_PAIRS);
     s_spd_src = ENC_SPD_DEFAULT;
     s_win_rpm = 0.0f;
-    s_still_cyc = 0u;
 }
 
 void mid_enc_update(void)
@@ -316,31 +314,6 @@ void mid_enc_update(void)
                 s_prev_mech = mech;
                 s_prev_elec = elec;
             }
-            /* ---- S10 lost-lock guard ----
-             * A type-2 PLL free-runs once the true speed is outside its
-             * capture range: measured on hardware, the rotor sat still while
-             * the reading stayed at the 2000 rpm clamp for ~6 s, which would
-             * also disable the stall protection (|spd| < 30 never met).
-             *
-             * The check runs on every update (not inside the 10 ms window):
-             * in IDLE the updates are ~2 ms apart, every one looks like a gap
-             * to the accumulator, so a guard living there would never run. */
-            if ((dt != 0u) && (fabsf(dm) < (ENC_STILL_TOL_DEG * (ENC_TWO_PI / 360.0f)))) {
-                s_still_cyc += dt;
-            } else {
-                s_still_cyc = 0u;
-            }
-
-            if ((s_still_cyc >= ((SYS_CORE_CLK_HZ / 1000u) * ENC_PLL_STALL_MS)) &&
-                (fabsf(s_enc.spd_rpm) > ENC_PLL_STALL_PLL_RPM)) {
-                s_still_cyc = 0u;
-                s_pll_resets++;
-                s_pll.omega = 0.0f;          /* drop the integrator */
-                alg_pll_reset(&s_pll, elec);
-                s_enc.spd_hz  = 0.0f;
-                s_enc.spd_rpm = 0.0f;
-            }
-
             if (s_acc_cyc >= (SYS_CORE_CLK_HZ / 1000u) * ENC_SPD_WINDOW_MS) {
                 float dt_s = (float)s_acc_cyc / (float)SYS_CORE_CLK_HZ;
                 s_win_rpm = ((s_acc_mech / dt_s) * (60.0f / ENC_TWO_PI));
@@ -389,6 +362,23 @@ uint8_t mid_enc_pll_locked(void)
 void mid_enc_set_pll_bw(float wn_hz, float zeta)
 {
     alg_pll_set_bw(&s_pll, wn_hz, zeta);
+}
+
+/* Drop the PLL state: called when the bridge is disabled so a free-running
+ * speed estimate cannot survive the transition (measured: the reported
+ * speed stayed at the 2000 rpm clamp for ~6 s after "stop").
+ * Deliberately NOT a motion detector: that interacted with the gap path
+ * of the PLL and fired during normal acceleration. */
+void mid_enc_pll_clear(void)
+{
+    s_pll.omega = 0.0f;
+    alg_pll_reset(&s_pll, s_enc.elec_deg * (ENC_TWO_PI / 360.0f));
+    s_enc.spd_hz  = 0.0f;
+    s_enc.spd_rpm = 0.0f;
+    s_win_rpm     = 0.0f;
+    s_acc_mech = 0.0f;
+    s_acc_elec = 0.0f;
+    s_acc_cyc  = 0u;
 }
 
 uint32_t mid_enc_pll_resets(void)

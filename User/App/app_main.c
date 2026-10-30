@@ -700,6 +700,9 @@ uint8_t app_start(void)
 
 uint8_t app_stop(void)
 {
+    /* S10: a free-running PLL must not survive the transition. */
+    mid_enc_pll_clear();
+
     alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
     alg_foc_reset(&s_foc);
     app_spd_off();
@@ -793,6 +796,10 @@ void app_fault_raise(uint8_t code, float value)
     s_foc_info.iq_ref  = 0.0f;
     s_step_phase       = 0u;
     alg_foc_reset(&s_foc);
+
+    /* S10: the bridge is about to go quiet, so the speed estimate must not
+     * keep free-running (see mid_enc_pll_clear). */
+    mid_enc_pll_clear();
 
     s_fault.code      = code;
     s_fault.value     = value;

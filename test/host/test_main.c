@@ -2360,16 +2360,15 @@ static void test_cmd(void)
         cmd_feed("mode 0\r\n");
     }
     section_end();
-    section("enc: lost-lock guard clears a free-running PLL");
+    section("enc: pll_clear drops a free-running speed estimate");
     {
-        /* A type-2 PLL cannot pull back once the true speed is outside
-         * its capture range: it keeps reporting the old speed. Measured on
-         * hardware: rotor stationary, reading stuck at the 2000 rpm clamp
-         * for ~6 s. The window estimator is unambiguous, so the guard must
-         * clear the integrator. */
+        /* A type-2 PLL cannot pull back once the true speed is outside its
+         * capture range: it keeps reporting the old speed (measured on
+         * hardware: 2000 rpm clamp for ~6 s after "stop"). The app calls
+         * mid_enc_pll_clear() whenever the bridge is disabled, so the stale
+         * estimate cannot survive the transition. */
         extern DWT_TypeDef fake_dwt;
         uint32_t t  = 1000000u;
-        uint32_t r0;
         uint16_t raw = 0u;
         int i;
 
@@ -2387,24 +2386,25 @@ static void test_cmd(void)
         }
         T(fabsf(mid_enc_pll_rpm()) > 800.0f);
 
-        /* rotor now stationary (same frame) but keep the loop running */
-        r0 = mid_enc_pll_resets();
+        mid_enc_pll_clear();              /* what app_stop() does */
+        T(fabsf(mid_enc_info()->spd_rpm) < 1.0f);
+        T(fabsf(mid_enc_pll_rpm()) < 1.0f);
+
+        /* the rotor is stationary and the estimate must stay at zero */
         for (i = 0; i < 3000; i++) {
             t += 8500u;
             fake_dwt.CYCCNT = t;
             enc_build_frame(raw, 0u);
             mid_enc_update();
         }
-        T(mid_enc_pll_resets() > r0);     /* the guard fired */
         T(fabsf(mid_enc_pll_rpm()) < 50.0f);
     }
     section_end();
 
-    section("enc: the guard stays quiet while the motor really turns");
+    section("enc: tracking is untouched while the motor turns");
     {
         extern DWT_TypeDef fake_dwt;
         uint32_t t  = 2000000u;
-        uint32_t r0;
         uint16_t raw = 0u;
         int i;
 
@@ -2419,19 +2419,10 @@ static void test_cmd(void)
             enc_build_frame(raw, 0u);
             mid_enc_update();
         }
-        r0 = mid_enc_pll_resets();
-        for (i = 0; i < 2000; i++) {
-            t += 8500u;
-            fake_dwt.CYCCNT = t;
-            raw = (uint16_t)(raw + 20u);
-            enc_build_frame(raw, 0u);
-            mid_enc_update();
-        }
-        T(mid_enc_pll_resets() == r0);    /* never fired */
         T(fabsf(mid_enc_pll_rpm()) > 800.0f);
+        T(fabsf(mid_enc_info()->spd_rpm - mid_enc_pll_rpm()) < 1.0f);
     }
     section_end();
-
     section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the
