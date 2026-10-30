@@ -59,6 +59,7 @@ static uint8_t   s_sfoc;      /* 1 = sensorless: angle and speed from the observ
 static uint8_t   s_ho_state;   /* 0 idle, 1 watching, 2 blending, 3 done */
 static uint16_t  s_ho_cnt;
 static float     s_ho_w;       /* blend weight 0..1 */
+static float     s_if_rpm_tgt;  /* rpm requested by sfoc go */
 static float     s_ho_dth;     /* |theta_obs - theta_if|, rad */
 
 static alg_if_t      s_if;       /* S10.4 open-loop ramp */
@@ -1373,7 +1374,9 @@ static void task_foc(uint32_t t_pick)
                 /* S10.5b: from here the observer owns both angle and speed.
                  * Start the speed loop at the frequency the drag was running,
                  * then drop the forced ramp so nothing fights it. */
-                rpm_tgt = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
+                rpm_tgt = (s_if_rpm_tgt != 0.0f)
+                        ? s_if_rpm_tgt
+                        : (s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS));
                 s_sfoc  = 1u;
                 alg_if_stop(&s_if);
                 app_spd_set(rpm_tgt);
@@ -1577,6 +1580,11 @@ uint8_t app_if_start(float rpm)
 
     /* Mechanical rpm -> electrical Hz. */
     f_hz = (rpm / 60.0f) * (float)ENC_POLE_PAIRS;
+
+    /* Remember the request: the hand-over fires as soon as the ramp passes
+     * the 250 rpm criterion, so the instantaneous frequency is NOT the
+     * speed the caller asked for (measured 05:08: asked 1400, held 280). */
+    s_if_rpm_tgt = rpm;
 
     app_spd_off();                  /* no speed loop during a forced run */
 
