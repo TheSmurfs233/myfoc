@@ -1309,10 +1309,15 @@ static void task_foc(uint32_t t_pick)
      * speed loop must stay out of the way (no meaningful feedback yet). */
     if (s_if.run != 0u) {
         alg_if_step(&s_if, FOC_TS);
-        s_foc_info.id_ref  = s_if.i_now;
-        s_foc_info.iq_ref  = 0.0f;
-        id_ref             = s_if.i_now;
-        iq_ref             = 0.0f;
+        /* Torque, not alignment: the current must sit on the q axis of the
+         * forced frame. A d-axis vector only pulls the rotor INTO the frame
+         * (that is what align ol does) and produces no torque, so the rotor
+         * would just sit there. Measured with id = i_amp on #138: frequency
+         * ramped to 35 Hz, current 0.40 A, encoder 0 rpm. */
+        s_foc_info.id_ref  = 0.0f;
+        s_foc_info.iq_ref  = s_if.i_now;
+        id_ref             = 0.0f;
+        iq_ref             = s_if.i_now;
         s_foc_info.spd_rpm = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
     }
 
