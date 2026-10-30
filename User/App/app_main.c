@@ -22,6 +22,7 @@
 #include "alg_svpwm.h"
 #include "alg_vf.h"
 #include "alg_foc.h"
+#include "alg_obs.h"
 #include "alg_spd.h"
 #include "bsp_adc.h"
 #include "bsp_vbus.h"
@@ -51,6 +52,8 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 
 /* ---- open-loop V/f (S4) ---- */
 static alg_vf_t      s_vf;
+static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
+static alg_obs_t     s_obs;      /* S10.1 shadow observer */
 static app_vf_info_t s_vf_info;
 
 /* ---- FOC current loop (S6) ---- */
@@ -230,6 +233,10 @@ const char *app_mode_name(uint8_t m)
 /* ------------------------------------------------------------------ */
 void app_init(void)
 {
+    /* S10.1: shadow observer. Starts disabled; "obs on" arms it. */
+    alg_obs_init(&s_obs, MOTOR_R_OHM, MOTOR_L_H, OBS_LPF_HZ,
+                  OBS_PLL_WN_HZ, OBS_W_MAX_RADS);
+    s_obs_on = 0u;
     s_st.uptime_ms    = 0u;
     s_st.state        = APP_ST_INIT;
     s_st.mode         = CTRL_IDLE;
@@ -1285,6 +1292,12 @@ static void task_foc(uint32_t t_pick)
                        e->spd_hz * 6.283185307179586f,
                        id_ref, iq_ref, FOC_TS, duty);
 
+    /* ---- S10.1: shadow observer (measures only, never drives) ---- */
+    if (s_obs_on != 0u) {
+        alg_obs_step(&s_obs, s_foc.v_alpha, s_foc.v_beta,
+                     s_foc.i_alpha, s_foc.i_beta, FOC_TS);
+    }
+
     for (i = 0u; i < 3u; i++) {
         if (duty[i] < 0.0f) { duty[i] = 0.0f; }
         if (duty[i] > 1.0f) { duty[i] = 1.0f; }
@@ -1398,6 +1411,53 @@ void app_counters_clear(void)
      * "clear counters", and without this the CRC count could not be
      * measured over a window (it kept the historical total). */
     mid_enc_clear_errs();
+}
+
+/* ------------------------------------------------------------------ */
+/* S10.1 back-EMF observer (shadow mode)                              */
+/* ------------------------------------------------------------------ */
+uint8_t app_obs_set_on(uint8_t on)
+{
+    s_obs_on = (on != 0u) ? 1u : 0u;
+    if (s_obs_on != 0u) {
+        /* Start from the encoder angle when it is valid, otherwise 0:
+         * the PLL converges either way, this only avoids a long swing. */
+        float th0 = (mid_enc_info()->valid != 0u)
+                  ? (mid_enc_info()->elec_deg * 0.0174532925199433f) : 0.0f;
+
+        alg_obs_reset(&s_obs, th0);
+    }
+    return s_obs_on;
+}
+
+uint8_t app_obs_get_on(void)
+{
+    return s_obs_on;
+}
+
+uint8_t app_obs_set_bw(float wn_hz)
+{
+    if ((wn_hz < 5.0f) || (wn_hz > 500.0f)) {
+        return 1u;
+    }
+    alg_pll_set_bw(&s_obs.pll, wn_hz, 0.707f);
+    return 0u;
+}
+
+void app_obs_set_rl(float r_ohm, float l_h)
+{
+    if (r_ohm > 0.0f) { s_obs.r_ohm = r_ohm; }
+    if (l_h   > 0.0f) { s_obs.l_h   = l_h;   }
+}
+
+void app_obs_reset(float theta)
+{
+    alg_obs_reset(&s_obs, theta);
+}
+
+const void *app_obs_info(void)
+{
+    return (const void *)&s_obs;
 }
 
 const app_status_t *app_status(void)
@@ -1829,6 +1889,17 @@ static void task_wave(uint32_t now)
     ch[16] = bsp_vbus_volts();           /* DC bus voltage, V */
     ch[17] = mid_enc_win_rpm();          /* window estimator, rpm */
     ch[18] = mid_enc_pll_rpm();          /* PLL observer, rpm     */
+    /* S10.1: back-EMF observer against the encoder. ch19 = estimated
+     * electrical angle, ch20 = wrapped difference to the encoder (deg).
+     * If ch20 stays small the observer is good enough to take over. */
+    ch[19] = s_obs.theta * 57.29577951308232f;
+    {
+        float de = s_obs.theta - (mid_enc_info()->elec_deg * 0.0174532925199433f);
+
+        while (de >  3.14159265f) { de -= 6.283185307179586f; }
+        while (de < -3.14159265f) { de += 6.283185307179586f; }
+        ch[20] = de * 57.29577951308232f;
+    }
 
     if (vofa_send(ch, (uint8_t)WAVE_CH) != 0u) {
         s_st.wave_frames++;

@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             129u
+#define FW_BUILD_ID             130u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -304,6 +304,16 @@ extern "C" {
  * long enough for the rotor to stop swinging after the step. */
 #define ALIGN_OL_MS             500u
 
+/* ==========================================================================
+ * S10.1: back-EMF observer (shadow mode)
+ * ==========================================================================
+ * R and L come from motor_cfg.h. The low pass filters e_alpha/e_beta;
+ * the PLL bandwidth is the observer loop (independent of the encoder PLL).
+ * w_max keeps the estimate sane if the loop is fed garbage. */
+#define OBS_LPF_HZ              1500.0f  /* back-EMF low pass         */
+#define OBS_PLL_WN_HZ           80.0f    /* observer PLL bandwidth     */
+#define OBS_W_MAX_RADS          (2000.0f * 0.10472f * 7.0f)  /* 2000 rpm elec */
+
 /* VOFA+ waveform: number of channels per frame (FireWater: 5 bytes each).
  *   0 time, 1..3 duties, 4..6 phase currents, 7..9 encoder,
  *   10 id, 11 iq, 12 id_ref, 13 iq_ref, 14 vd, 15 vq, 16 vbus,
@@ -311,7 +321,7 @@ extern "C" {
  *   S8.1 observer comparison.
  * 19 channels * 5 B = 95 B per frame; at 500 Hz that is 47.5 kB/s of the
  * 100 kB/s the 1 Mbaud link provides. */
-#define WAVE_CH                 19u
+#define WAVE_CH 21u
 
 /* FOC current loop (S6).
  * Design start: R = 2.3 ohm/phase, L = 0.5 mH, fc = 500 Hz ->

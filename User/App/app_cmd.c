@@ -10,6 +10,7 @@
 
 #include "app_cmd.h"
 #include "app_main.h"
+#include "alg_obs.h"
 #include "board_cfg.h"
 #include "bsp_adc.h"
 #include "bsp_cordic.h"
@@ -157,6 +158,7 @@ static void print_help(void)
     log_printf(" cordic         dump raw CORDIC readback for 4 angles");
     log_printf(" enc [zero [deg]|dir|raw]  angle, zero capture/restore, direction");
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
+    log_printf(" obs [on|off|bw|r|l]   back-EMF observer, shadow mode (S10.1)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -899,6 +901,62 @@ static float   s_pll_zeta = PLL_ZETA;
             break;
         }
     }
+    /* ---------------- obs (S10.1 back-EMF observer) --------------- */
+    else if (strcmp(tok[0], "obs") == 0) {
+        if ((n >= 2u) && (strcmp(tok[1], "on") == 0)) {
+            (void)app_obs_set_on(1u);
+            log_printf("OK obs on (shadow mode, not used for control)");
+        } else if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
+            (void)app_obs_set_on(0u);
+            log_printf("OK obs off");
+        } else if ((n >= 3u) && (strcmp(tok[1], "bw") == 0)) {
+            float hz;
+
+            if (parse_num(tok[2], &hz) && (app_obs_set_bw(hz) == 0u)) {
+                log_printf("OK obs bw = %.1f Hz", (double)hz);
+            } else {
+                log_printf("ERR usage=obs bw <5..500 Hz>");
+            }
+        } else if ((n >= 3u) && ((strcmp(tok[1], "r") == 0) ||
+                                 (strcmp(tok[1], "l") == 0))) {
+            float val;
+            const alg_obs_t *o = (const alg_obs_t *)app_obs_info();
+
+            if (!parse_num(tok[2], &val) || (val <= 0.0f)) {
+                log_printf("ERR usage=obs r <ohm> | obs l <mH>");
+            } else if (tok[1][0] == (char)0x72) {     /* r */
+                app_obs_set_rl(val, o->l_h);
+                log_printf("OK obs R = %.3f ohm", (double)val);
+            } else {                                  /* l */
+                app_obs_set_rl(o->r_ohm, val * 0.001f);
+                log_printf("OK obs L = %.3f mH", (double)val);
+            }
+        } else {
+            const alg_obs_t *o = (const alg_obs_t *)app_obs_info();
+            const mid_enc_t *e = mid_enc_info();
+            float err_deg;
+            float rpm;
+
+            err_deg = o->theta - (e->elec_deg * 0.0174532925199433f);
+            while (err_deg >  3.14159265f) { err_deg -= 6.283185307179586f; }
+            while (err_deg < -3.14159265f) { err_deg += 6.283185307179586f; }
+            err_deg *= 57.29577951308232f;
+
+            rpm = o->omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS;
+
+            log_printf("obs %s, R %.3f ohm, L %.3f mH, e %.2f/%.2f V",
+                       (app_obs_get_on() != 0u) ? "ON (shadow)" : "off",
+                       (double)o->r_ohm, (double)(o->l_h * 1000.0f),
+                       (double)o->e_alpha, (double)o->e_beta);
+            log_printf(" ed %.3f V, eq %.3f V, theta %.1f deg, w %.0f rpm",
+                       (double)o->ed, (double)o->eq,
+                       (double)(o->theta * 57.29577951308232f), (double)rpm);
+            log_printf(" enc elec %.1f deg, angle err %.2f deg, locked %u",
+                       (double)e->elec_deg, (double)err_deg,
+                       (unsigned)o->pll.locked);
+        }
+    }
+
     /* ---------------- enc ----------------- */
     else if (strcmp(tok[0], "enc") == 0) {
         const mid_enc_t *e = mid_enc_info();

@@ -551,6 +551,11 @@
               <FilePath>../User/Alg/alg_pll.c</FilePath>
             </File>
             <File>
+              <FileName>alg_obs.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Alg/alg_obs.c</FilePath>
+            </File>
+            <File>
               <FileName>app_main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/App/app_main.c</FilePath>

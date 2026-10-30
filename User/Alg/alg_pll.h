@@ -55,6 +55,12 @@ void  alg_pll_reset(alg_pll_t *p, float theta0);
  * Returns the estimated speed in rad/s. */
 float alg_pll_step(alg_pll_t *p, float theta_meas, float dt);
 
+/* S10.1: feed the phase error directly (used by the back-EMF
+ * observer, whose error is |e|*sin(dtheta) rather than an angle).
+ * err is in the same unit the gains expect (rad for the encoder
+ * PLL); dt in seconds. Returns the estimated speed. */
+float alg_pll_step_err(alg_pll_t *p, float err, float dt);
+
 #ifdef __cplusplus
 }
 #endif

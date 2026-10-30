@@ -51,6 +51,14 @@ uint8_t app_align_start(void);
  * ALIGN_OL_MS and stop. Needs no encoder (S10.0c).
  * Returns 0 = OK, 2 = not running, 3 = already aligning. */
 uint8_t app_align_ol_start(void);
+/* ---- S10.1 back-EMF observer (shadow mode) ---- */
+struct alg_obs_s;   /* opaque; see alg_obs.h */
+uint8_t  app_obs_set_on(uint8_t on);   /* 0 = off, 1 = running       */
+uint8_t  app_obs_get_on(void);
+uint8_t  app_obs_set_bw(float wn_hz);  /* 0 = OK, 1 = rejected       */
+void     app_obs_set_rl(float r_ohm, float l_h);
+void     app_obs_reset(float theta);
+const void *app_obs_info(void);        /* cast to const alg_obs_t*   */
 const app_align_t *app_align_info(void);
 
 /* Control mode */

@@ -38,6 +38,7 @@
 #include "alg_foc.h"
 #include "alg_spd.h"
 #include "alg_pll.h"
+#include "alg_obs.h"
 #include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
@@ -2284,6 +2285,64 @@ static void test_cmd(void)
         cmd_feed(big);
         cmd_feed("\r\n");
         T(tx_contains("ERR line too long"));
+    }
+    section_end();
+
+    section("alg_obs: tracks a synthetic constant-speed motor");
+    {
+        /* Pretend the plant is v = e (no current), with
+         *   e = w*psi*(-sin th, cos th)
+         * and check that the observer recovers theta and w. */
+        alg_obs_t ob;
+        const float psi = 0.00413f;
+        const float ts  = 50.0e-6f;
+        const float we  = 440.0f;      /* elec rad/s ~= 600 rpm */
+        float th = 0.5f;               /* deliberately not 0 */
+        int k;
+        float de;
+
+        alg_obs_init(&ob, 2.3f, 0.0005f, 1500.0f, 80.0f, 4000.0f);
+        for (k = 0; k < 4000; k++) {   /* 200 ms */
+            float ea = -(we * psi) * sinf(th);
+            float eb =  (we * psi) * cosf(th);
+
+            alg_obs_step(&ob, ea, eb, 0.0f, 0.0f, ts);
+            th += we * ts;
+            while (th >= 6.2831853f) { th -= 6.2831853f; }
+        }
+        de = ob.theta - th;
+        while (de >  3.14159265f) { de -= 6.283185307179586f; }
+        while (de < -3.14159265f) { de += 6.283185307179586f; }
+        T(fabsf(de) < 0.05f);          /* < 2.9 deg */
+        T(fabsf(ob.omega_e - we) < (0.05f * we));
+        /* eq carries the amplitude, ~= w*psi */
+        T(fabsf(ob.eq - (we * psi)) < (0.15f * we * psi));
+    }
+    section_end();
+
+    section("alg_obs: converges from a 1 rad initial error");
+    {
+        alg_obs_t ob;
+        const float psi = 0.00413f;
+        const float ts  = 50.0e-6f;
+        const float we  = 220.0f;
+        float th = 1.0f;
+        int k;
+        float de;
+
+        alg_obs_init(&ob, 2.3f, 0.0005f, 1500.0f, 80.0f, 4000.0f);
+        alg_obs_reset(&ob, 0.0f);
+        for (k = 0; k < 8000; k++) {   /* 400 ms */
+            float ea = -(we * psi) * sinf(th);
+            float eb =  (we * psi) * cosf(th);
+
+            alg_obs_step(&ob, ea, eb, 0.0f, 0.0f, ts);
+            th += we * ts;
+        }
+        de = ob.theta - th;
+        while (de >  3.14159265f) { de -= 6.283185307179586f; }
+        while (de < -3.14159265f) { de += 6.283185307179586f; }
+        T(fabsf(de) < 0.10f);          /* < 5.7 deg after 400 ms */
     }
     section_end();
 

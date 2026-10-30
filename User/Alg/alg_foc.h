@@ -45,6 +45,12 @@ typedef struct {
     float    vd;
     float    vq;
     float    m;
+
+    /* S10.1: stationary-frame inputs to the back-EMF observer. */
+    float    i_alpha;
+    float    i_beta;
+    float    v_alpha;
+    float    v_beta;
 } alg_foc_t;
 
 void alg_foc_init(alg_foc_t *f, float vdc, float m_max,

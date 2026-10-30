@@ -144,6 +144,11 @@ float alg_foc_step(alg_foc_t *f,
     alg_clarke(ia, ib, &alpha, &beta);
     alg_park(alpha, beta, s, c, &f->id, &f->iq);
 
+    /* S10.1: keep the stationary-frame quantities for the back-EMF
+     * observer (it needs i_ab and the commanded v_ab). */
+    f->i_alpha = alpha;
+    f->i_beta  = beta;
+
     vd = alg_pi_step(&f->pi_d, id_ref - f->id, ts);
     vq = alg_pi_step(&f->pi_q, iq_ref - f->iq, ts);
 
@@ -196,6 +201,9 @@ float alg_foc_step(alg_foc_t *f,
     f->vq = vq;
 
     alg_inv_park(vd, vq, s, c, &v_alpha, &v_beta);
+
+    f->v_alpha = v_alpha;
+    f->v_beta  = v_beta;
 
     /* Volts -> modulation index (m = 1 at 0.5*Vdc phase amplitude). */
     scale = 2.0f / f->vdc;

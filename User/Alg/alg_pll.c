@@ -68,6 +68,18 @@ float alg_pll_step(alg_pll_t *p, float theta_meas, float dt)
     while (err >  PLL_PI) { err -= PLL_TWO_PI; }
     while (err < -PLL_PI) { err += PLL_TWO_PI; }
 
+    return alg_pll_step_err(p, err, dt);
+}
+
+/* S10.1: the back-EMF observer already produces an error signal
+ * (ed = |e| * sin(angle_error)), not an angle, so it cannot use the wrap
+ * above. Feed the error directly; the loop core is identical. */
+float alg_pll_step_err(alg_pll_t *p, float err, float dt)
+{
+    if ((p == 0) || (dt <= 0.0f)) {
+        return (p != 0) ? p->omega : 0.0f;
+    }
+
     p->err = err;
 
     /* Type 2 loop: the integrator carries the speed, the proportional term
