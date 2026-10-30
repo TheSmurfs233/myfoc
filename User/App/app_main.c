@@ -1618,7 +1618,13 @@ uint8_t app_sfoc_on(void)   { return s_sfoc; }
 uint8_t app_ho_state(void) { return s_ho_state; }
 float   app_ho_w(void)     { return s_ho_w; }
 float   app_ho_dth(void)   { return s_ho_dth; }
-void    app_ho_reset(void) { s_ho_state = 0u; s_ho_cnt = 0u; s_ho_w = 0.0f; }
+void    app_ho_reset(void)
+{
+    s_sfoc     = 0u;
+    s_ho_state = 0u;
+    s_ho_cnt   = 0u;
+    s_ho_w     = 0.0f;
+}
 void    app_ho_arm(void)
 {
     s_sfoc     = 0u;          /* leave sensorless mode while re-arming */

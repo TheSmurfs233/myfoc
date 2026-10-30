@@ -75,6 +75,7 @@ float    app_if_freq_hz(void);
 float    app_if_amp(void);
 
 /* ---- S10.5 hand-over ---- */
+void     app_ho_reset(void);      /* back to idle */
 void     app_ho_arm(void);
 uint8_t  app_sfoc_on(void);     /* 1 = angle+speed from the observer */        /* start watching for the hand-over */
 uint8_t  app_ho_state(void);      /* 0 idle, 1 watching, 2 blend, 3 done */

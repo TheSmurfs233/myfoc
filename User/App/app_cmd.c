@@ -951,9 +951,8 @@ static float   s_pll_zeta = PLL_ZETA;
     else if (strcmp(tok[0], "sfoc") == 0) {
         if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
             app_if_stop();
-            app_ho_arm();          /* reuse: reset to watching */
-            app_ho_arm();
-            log_printf("OK sfoc off");
+            app_ho_reset();        /* idle, not watching */
+            log_printf("OK sfoc off (encoder mode)");
         } else if ((n >= 3u) && (strcmp(tok[1], "go") == 0)) {
             float rpm;
 
