@@ -330,7 +330,8 @@ extern "C" {
  *   10 id, 11 iq, 12 id_ref, 13 iq_ref, 14 vd, 15 vq, 16 vbus,
  *   17 window speed (rpm), 18 PLL speed (rpm) -- the last two are for the
  *   S8.1 observer comparison.
- * 19 channels * 5 B = 95 B per frame; at 500 Hz that is 47.5 kB/s of the
+ *   19 back-EMF observer angle (deg), 20 observer-vs-encoder error (deg).
+ * 21 channels * 5 B = 105 B per frame; at 500 Hz that is 52.5 kB/s of the
  * 100 kB/s the 1 Mbaud link provides. */
 #define WAVE_CH 21u
 
