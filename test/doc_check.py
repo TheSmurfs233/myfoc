@@ -173,13 +173,22 @@ if build_id is not None:
     # Historical rows (S1..S7) record the build used at that stage, so only the
     # newest stage row and the README baseline are checked for drift.
     if os.path.exists(PROGRESS):
+        # Compare against the HIGHEST stage row (the project's current stage),
+        # not a hard-coded one, so adding S9/S10/... needs no code change.
+        best = None
         for n, line in enumerate(read(PROGRESS).splitlines(), 1):
-            if '**S8**' not in line:
+            m = re.search(r'\| \*\*S(\d+)(?:\.\d+)?\*\* \|', line)
+            if not m:
                 continue
+            stage = int(m.group(1))
+            if best is None or stage > best[0]:
+                best = (stage, n, line)
+        if best is not None:
+            n, line = best[1], best[2]
             m = re.search(r'固件\s*#(\d+)', line)
             if m and int(m.group(1)) != build_id:
-                err('%s:%d S8 row says 固件 #%s, board_cfg.h has #%d'
-                    % (rel(PROGRESS), n, m.group(1), build_id))
+                err('%s:%d S%d row says 固件 #%s, board_cfg.h has #%d'
+                    % (rel(PROGRESS), n, best[0], m.group(1), build_id))
     if os.path.exists(README):
         for n, line in enumerate(read(README).splitlines(), 1):
             if '基线' not in line:
