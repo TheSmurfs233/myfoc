@@ -1301,12 +1301,17 @@ static void task_foc(uint32_t t_pick)
      * does (measured: eq 0.0 V while claiming 400 rpm) the drive is in a
      * false equilibrium: the rotor is held still by a frozen angle while
      * the speed loop keeps pushing. Detect and drop out. */
-    if (s_sfoc != 0u) {
+    if ((s_sfoc != 0u) && (s_ho_state == 3u)) {   /* only once handed over */
         float spd_obs = s_obs.omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS;
         float eq_a = (s_obs.eq > 0.0f) ? s_obs.eq : -s_obs.eq;
         float sp_a = (spd_obs > 0.0f) ? spd_obs : -spd_obs;
+        float w_a  = (s_obs.omega_e > 0.0f) ? s_obs.omega_e : -s_obs.omega_e;
+        float eq_exp = w_a * MOTOR_KE_V_RAD_S;   /* what a locked observer owes */
 
-        if ((eq_a < HO_LOST_EQ_V) && (sp_a > HO_LOST_MIN_RPM)) {
+        /* Ratio, not an absolute level: eq and omega grow together during
+         * the ramp, so a fixed threshold aborted a healthy start. */
+        if ((eq_exp > 0.05f) && (sp_a > HO_LOST_MIN_RPM) &&
+            (eq_a < (HO_LOST_EQ_RATIO * eq_exp))) {
             if (s_lost_ms < 0xFFFFu) {
                 s_lost_ms++;
             }

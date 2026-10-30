@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             151u
+#define FW_BUILD_ID             152u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -336,10 +336,13 @@ extern "C" {
  * ~74 deg - the forced frame is not where the rotor is. Judge the observer
  * instead: enough back-EMF, enough speed, PLL locked. */
 #define HO_MIN_RPM              250.0f  /* below this the back-EMF is too weak */
-/* Loss of lock: the observer claims a speed while its back-EMF says
- * there is none. At 400 rpm |eq| is about 1.06 V, so 0.25 V is a
- * clear "signal gone" with 4x margin. */
-#define HO_LOST_EQ_V            0.25f
+/* Loss of lock: compare |eq| against what the reported speed implies.
+ * An absolute threshold is wrong: during the startup ramp eq starts at 0
+ * and grows with the speed, so it is legitimately small (measured 05:35:
+ * a 0.25 V absolute limit aborted the drive 1.5 s after "sfoc go").
+ * Locked: |eq| / (|omega_e| * flux) ~ 0.87 measured.
+ * Lost  : ratio ~ 0.02 (rotor still, observer free-running). */
+#define HO_LOST_EQ_RATIO        0.30f
 #define HO_LOST_MIN_RPM         100.0f
 #define HO_LOST_MS              100u
 #define HO_HOLD_MS              20u
