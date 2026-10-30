@@ -960,9 +960,13 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("ERR usage=sfoc go <rpm>");
             } else if (app_if_start(rpm) != 0u) {
                 log_printf("ERR start first");
-            } else if (app_obs_get_on() == 0u) {
-                log_printf("ERR obs off, run =obs on= first");
             } else {
+                /* S10.6: do not make "obs on" a separate ritual - the
+                 * hand-over needs it, so switch it on here. */
+                if (app_obs_get_on() == 0u) {
+                    (void)app_obs_set_on(1u);
+                    log_printf("(obs auto on for the hand-over)");
+                }
                 app_ho_arm();
                 log_printf("OK sfoc go %.0f rpm: I/f then hand over", (double)rpm);
             }

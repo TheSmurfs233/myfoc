@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             146u
+#define FW_BUILD_ID             147u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -154,6 +154,11 @@ extern "C" {
 #define PROT_STALL_RPM          30.0f
 #define PROT_STALL_IQ_A         0.6f
 #define PROT_STALL_MS           500u
+/* The stall judge uses a low-passed speed: a rotor shaking against
+ * a stalled speed loop crosses +-30 rpm every oscillation and kept
+ * resetting the debounce (measured 04:56, hand-loaded rotor: no trip).
+ * tau = 1/(2*pi*fc) with k = 0.01 at 1 kHz is about 100 ms. */
+#define PROT_STALL_LP_K         0.01f
 #define PROT_VBUS_MS            50u
 #define PROT_ENC_FRAMES         20u
 /* A disconnected sensor reads raw 0 forever (the all-zero CRC also passes),

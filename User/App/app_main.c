@@ -76,6 +76,7 @@ static app_fault_info_t s_fault;
 static uint32_t s_prot_start_ms;   /* start of the grace window        */
 static uint32_t s_prot_ov_ms;      /* overspeed debounce               */
 static uint32_t s_prot_stall_ms;   /* stall debounce                   */
+static float    s_spd_lp;        /* low-passed speed for the stall judge */
 static uint32_t s_prot_uv_ms;      /* under-voltage debounce           */
 static uint32_t s_prot_ovv_ms;     /* over-voltage debounce            */
 static uint16_t s_prot_enc_cnt;    /* consecutive bad encoder frames   */
@@ -715,6 +716,7 @@ uint8_t app_stop(void)
 {
     /* S10: a free-running PLL must not survive the transition. */
     mid_enc_pll_clear();
+    s_spd_lp = 0.0f;
 
     alg_vf_stop(&s_vf);                  /* drop the V/f ramp first */
     alg_foc_reset(&s_foc);
@@ -1896,6 +1898,8 @@ static void prot_check_1ms(uint32_t now)
     /* Grace window: the first milliseconds after start are not representative
      * (the bus sags while the gate drivers come up, the speed estimate is
      * still empty). */
+    s_spd_lp += (PROT_STALL_LP_K * (e->spd_rpm - s_spd_lp));
+
     if ((uint32_t)(now - s_prot_start_ms) < (uint32_t)PROT_GRACE_MS) {
         s_prot_ov_ms = 0u;
         s_prot_stall_ms = 0u;
@@ -1906,6 +1910,8 @@ static void prot_check_1ms(uint32_t now)
 
     spd  = e->spd_rpm;
     vbus = bsp_vbus_volts();
+
+    /* (the stall judge low-pass lives just above, before the grace check) */
 
     /* ---- over-speed: any mode ---- */
     if ((spd > s_prot.overspeed_rpm) || (spd < -s_prot.overspeed_rpm)) {
@@ -1922,7 +1928,7 @@ static void prot_check_1ms(uint32_t now)
     /* ---- stall: only meaningful while the speed loop owns the torque. In
      * torque mode holding the shaft still is a legitimate experiment. ---- */
     if ((s_spd.on != 0u) &&
-        (spd < s_prot.stall_rpm) && (spd > -s_prot.stall_rpm) &&
+        (s_spd_lp < s_prot.stall_rpm) && (s_spd_lp > -s_prot.stall_rpm) &&
         ((s_foc_info.iq_ref > s_prot.stall_iq_a) ||
          (s_foc_info.iq_ref < -s_prot.stall_iq_a))) {
         if (s_prot_stall_ms == 0u) {
