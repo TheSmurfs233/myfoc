@@ -160,6 +160,7 @@ static void print_help(void)
     log_printf(" align [ol]     pull the rotor to a known angle (ol = no encoder needed)");
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
     log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
+    log_printf(" sfoc <go|off>  I/f then hand over to the observer (S10.5)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on|off>  VOFA+ waveform upload");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -943,6 +944,41 @@ static float   s_pll_zeta = PLL_ZETA;
                        (double)(app_if_freq_hz() * 60.0f / (float)ENC_POLE_PAIRS),
                        (double)app_if_amp(),
                        (double)(app_if_theta() * 57.29577951308232f));
+        }
+    }
+
+    /* ---------------- sfoc (S10.5 hand-over) --------------------- */
+    else if (strcmp(tok[0], "sfoc") == 0) {
+        if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
+            app_if_stop();
+            app_ho_arm();          /* reuse: reset to watching */
+            app_ho_arm();
+            log_printf("OK sfoc off");
+        } else if ((n >= 3u) && (strcmp(tok[1], "go") == 0)) {
+            float rpm;
+
+            if (!parse_num(tok[2], &rpm)) {
+                log_printf("ERR usage=sfoc go <rpm>");
+            } else if (app_if_start(rpm) != 0u) {
+                log_printf("ERR start first");
+            } else if (app_obs_get_on() == 0u) {
+                log_printf("ERR obs off, run =obs on= first");
+            } else {
+                app_ho_arm();
+                log_printf("OK sfoc go %.0f rpm: I/f then hand over", (double)rpm);
+            }
+        } else {
+            const alg_obs_t *o = (const alg_obs_t *)app_obs_info();
+            const mid_enc_t *e = mid_enc_info();
+            static const char *st[4] = {"idle", "watching", "blending", "done"};
+            uint8_t hs = app_ho_state();
+
+            log_printf("sfoc %s, blend %.2f, dth %.1f deg",
+                       (hs < 4u) ? st[hs] : "?", (double)app_ho_w(),
+                       (double)(app_ho_dth() * 57.29577951308232f));
+            log_printf(" obs w %.0f rpm, enc %.0f rpm, eq %.2f V",
+                       (double)(o->omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS),
+                       (double)e->spd_rpm, (double)o->eq);
         }
     }
 

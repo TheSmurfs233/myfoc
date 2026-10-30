@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             142u
+#define FW_BUILD_ID             143u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -318,6 +318,20 @@ extern "C" {
  * the 180 deg ambiguity becomes a deterministic start (measured: without
  * it the drag worked or failed purely on the starting position). */
 #define IF_ALIGN_MS            400u
+
+/* ==========================================================================
+ * S10.5: hand-over from the I/f frame to the observer
+ * ==========================================================================
+ * Conditions (all must hold continuously):
+ *   |theta_obs - theta_if| < HO_ANGLE_DEG,  |eq| > OBS_E_MIN_V
+ * then the angle is blended over HO_BLEND_MS so the switch is not a step. */
+#define HO_ANGLE_DEG            25.0f
+#define HO_ANGLE_RAD            (HO_ANGLE_DEG * 0.0174532925199433f)
+#define HO_HOLD_MS              20u
+#define HO_HOLD_CNT             (HO_HOLD_MS * 20u)   /* control ticks at 20 kHz */
+#define HO_BLEND_MS             100u
+#define HO_BLEND_S              ((float)HO_BLEND_MS * 0.001f)
+#define OBS_E_MIN_V             0.50f
 #define IF_RPM_MAX             600.0f   /* ceiling for the "if" command */
 
 /* ==========================================================================

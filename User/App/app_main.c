@@ -54,6 +54,12 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 /* ---- open-loop V/f (S4) ---- */
 static alg_vf_t      s_vf;
 static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
+/* S10.5 hand-over */
+static uint8_t   s_ho_state;   /* 0 idle, 1 watching, 2 blending, 3 done */
+static uint16_t  s_ho_cnt;
+static float     s_ho_w;       /* blend weight 0..1 */
+static float     s_ho_dth;     /* |theta_obs - theta_if|, rad */
+
 static alg_if_t      s_if;       /* S10.4 open-loop ramp */
 static alg_obs_t     s_obs;      /* S10.1 shadow observer */
 static app_vf_info_t s_vf_info;
@@ -1310,6 +1316,34 @@ static void task_foc(uint32_t t_pick)
      * speed loop must stay out of the way (no meaningful feedback yet). */
     if (s_if.run != 0u) {
         alg_if_step(&s_if, FOC_TS);
+
+        /* ---- S10.5: hand-over evaluation ----
+         * Only once the drag phase is running (the rotor is actually turning). */
+        if ((s_ho_state == 1u) && (s_if.phase == 1u)) {
+            float de = s_obs.theta_out - s_if.theta;
+
+            while (de >  3.14159265f) { de -= 6.283185307179586f; }
+            while (de < -3.14159265f) { de += 6.283185307179586f; }
+            s_ho_dth = (de > 0.0f) ? de : -de;
+
+            if ((s_ho_dth < HO_ANGLE_RAD) && (fabsf(s_obs.eq) > OBS_E_MIN_V)) {
+                if (s_ho_cnt < 0xFFFFu) {
+                    s_ho_cnt++;
+                }
+                if (s_ho_cnt >= (uint16_t)HO_HOLD_CNT) {
+                    s_ho_state = 2u;
+                    s_ho_w     = 0.0f;
+                }
+            } else {
+                s_ho_cnt = 0u;
+            }
+        } else if (s_ho_state == 2u) {
+            s_ho_w += FOC_TS / HO_BLEND_S;
+            if (s_ho_w >= 1.0f) {
+                s_ho_w     = 1.0f;
+                s_ho_state = 3u;
+            }
+        }
         /* Torque, not alignment: the current must sit on the q axis of the
          * forced frame. A d-axis vector only pulls the rotor INTO the frame
          * (that is what align ol does) and produces no torque, so the rotor
@@ -1331,13 +1365,39 @@ static void task_foc(uint32_t t_pick)
         s_foc_info.spd_rpm = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
     }
 
-    /* S7.2: electrical angular speed for the feedforward, signed. */
-    (void)alg_foc_step(&s_foc, cs->ia, cs->ib, cs->ic,
-                       (s_if.run != 0u) ? s_if.theta
-                                        : (e->elec_deg * 0.0174532925199433f),
-                       (s_if.run != 0u) ? (6.283185307179586f * s_if.f_hz)
-                                        : (e->spd_hz * 6.283185307179586f),
-                       id_ref, iq_ref, FOC_TS, duty);
+    /* ---- S10.5: which angle drives the Park transform? ----
+     *   not in I/f        -> encoder
+     *   I/f, before blend -> forced frame
+     *   I/f, blending     -> forced + w * (obs - forced)
+     *                        (blend the DIFFERENCE: blending the wrapped
+     *                         angles directly jumps at the 2*pi seam)
+     *   I/f, after blend  -> observer */
+    {
+        float th_use;
+        float we_use;
+
+        if (s_if.run == 0u) {
+            th_use = e->elec_deg * 0.0174532925199433f;
+            we_use = e->spd_hz * 6.283185307179586f;
+        } else {
+            float de = s_obs.theta_out - s_if.theta;
+
+            while (de >  3.14159265f) { de -= 6.283185307179586f; }
+            while (de < -3.14159265f) { de += 6.283185307179586f; }
+
+            th_use = s_if.theta + (s_ho_w * de);
+            while (th_use >= 6.283185307179586f) { th_use -= 6.283185307179586f; }
+            while (th_use <  0.0f)                { th_use += 6.283185307179586f; }
+
+            we_use = (6.283185307179586f * s_if.f_hz * (1.0f - s_ho_w)) +
+                     (s_obs.omega_e * s_ho_w);
+        }
+
+        /* S7.2: electrical angular speed for the feedforward, signed. */
+        (void)alg_foc_step(&s_foc, cs->ia, cs->ib, cs->ic,
+                           th_use, we_use,
+                           id_ref, iq_ref, FOC_TS, duty);
+    }
 
     /* ---- S10.1: shadow observer (measures only, never drives) ---- */
     if (s_obs_on != 0u) {
@@ -1515,6 +1575,18 @@ void app_if_set_acc(float hz_s)
     if ((hz_s >= 2.0f) && (hz_s <= 300.0f)) {
         s_if.acc_hz_s = hz_s;
     }
+}
+
+/* ---- S10.5 hand-over ---- */
+uint8_t app_ho_state(void) { return s_ho_state; }
+float   app_ho_w(void)     { return s_ho_w; }
+float   app_ho_dth(void)   { return s_ho_dth; }
+void    app_ho_reset(void) { s_ho_state = 0u; s_ho_cnt = 0u; s_ho_w = 0.0f; }
+void    app_ho_arm(void)
+{
+    s_ho_state = 1u;
+    s_ho_cnt   = 0u;
+    s_ho_w     = 0.0f;
 }
 
 uint8_t app_if_on(void)      { return s_if.run; }
