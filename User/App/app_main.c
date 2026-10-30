@@ -55,6 +55,7 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 static alg_vf_t      s_vf;
 static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
 /* S10.5 hand-over */
+static uint8_t   s_sfoc;      /* 1 = sensorless: angle and speed from the observer */
 static uint8_t   s_ho_state;   /* 0 idle, 1 watching, 2 blending, 3 done */
 static uint16_t  s_ho_cnt;
 static float     s_ho_w;       /* blend weight 0..1 */
@@ -1294,11 +1295,22 @@ static void task_foc(uint32_t t_pick)
         s_spd_div++;
         if (s_spd_div >= (uint8_t)SPD_DIV) {
             s_spd_div = 0u;
-            (void)alg_spd_step(&s_spd, e->spd_rpm, SPD_TS_S);
+            float spd_fb;
+
+            /* S10.5b: in sensorless mode the observer's speed is the feedback;
+             * the encoder is only there to verify it. */
+            spd_fb = (s_sfoc != 0u)
+                   ? (s_obs.omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS)
+                   : e->spd_rpm;
+
+            (void)alg_spd_step(&s_spd, spd_fb, SPD_TS_S);
             s_foc_info.iq_ref = s_spd.out;
             s_foc_info.id_ref = 0.0f;
+            s_foc_info.spd_rpm = spd_fb;
         }
-        s_foc_info.spd_rpm = e->spd_rpm;
+        if (s_sfoc == 0u) {
+            s_foc_info.spd_rpm = e->spd_rpm;
+        }
     }
 
     /* ---- reference vector limit: never ask for more than the ADC range ---- */
@@ -1349,8 +1361,18 @@ static void task_foc(uint32_t t_pick)
         } else if (s_ho_state == 2u) {
             s_ho_w += FOC_TS / HO_BLEND_S;
             if (s_ho_w >= 1.0f) {
+                float rpm_tgt;
+
                 s_ho_w     = 1.0f;
                 s_ho_state = 3u;
+
+                /* S10.5b: from here the observer owns both angle and speed.
+                 * Start the speed loop at the frequency the drag was running,
+                 * then drop the forced ramp so nothing fights it. */
+                rpm_tgt = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
+                s_sfoc  = 1u;
+                alg_if_stop(&s_if);
+                app_spd_set(rpm_tgt);
             }
         }
         /* Torque, not alignment: the current must sit on the q axis of the
@@ -1385,7 +1407,11 @@ static void task_foc(uint32_t t_pick)
         float th_use;
         float we_use;
 
-        if (s_if.run == 0u) {
+        if (s_sfoc != 0u) {
+            /* True sensorless: the observer supplies the angle. */
+            th_use = s_obs.theta_out;
+            we_use = s_obs.omega_e;
+        } else if (s_if.run == 0u) {
             th_use = e->elec_deg * 0.0174532925199433f;
             we_use = e->spd_hz * 6.283185307179586f;
         } else {
@@ -1587,12 +1613,15 @@ void app_if_set_acc(float hz_s)
 }
 
 /* ---- S10.5 hand-over ---- */
+uint8_t app_sfoc_on(void)   { return s_sfoc; }
+
 uint8_t app_ho_state(void) { return s_ho_state; }
 float   app_ho_w(void)     { return s_ho_w; }
 float   app_ho_dth(void)   { return s_ho_dth; }
 void    app_ho_reset(void) { s_ho_state = 0u; s_ho_cnt = 0u; s_ho_w = 0.0f; }
 void    app_ho_arm(void)
 {
+    s_sfoc     = 0u;          /* leave sensorless mode while re-arming */
     s_ho_state = 1u;
     s_ho_cnt   = 0u;
     s_ho_w     = 0.0f;

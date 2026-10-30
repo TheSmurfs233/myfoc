@@ -973,9 +973,10 @@ static float   s_pll_zeta = PLL_ZETA;
             static const char *st[4] = {"idle", "watching", "blending", "done"};
             uint8_t hs = app_ho_state();
 
-            log_printf("sfoc %s, blend %.2f, dth %.1f deg",
+            log_printf("sfoc %s, blend %.2f, dth %.1f deg, sensorless %u",
                        (hs < 4u) ? st[hs] : "?", (double)app_ho_w(),
-                       (double)(app_ho_dth() * 57.29577951308232f));
+                       (double)(app_ho_dth() * 57.29577951308232f),
+                       (unsigned)app_sfoc_on());
             log_printf(" obs w %.0f rpm, enc %.0f rpm, eq %.2f V, locked %u",
                        (double)(o->omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS),
                        (double)e->spd_rpm, (double)o->eq, (unsigned)o->pll.locked);
