@@ -15,6 +15,8 @@
 #ifndef __BOARD_CFG_H
 #define __BOARD_CFG_H
 
+
+#include "motor_cfg.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -254,7 +256,7 @@ extern "C" {
  *    PA15 = CSN, PB3 = SCK, PB4 = MISO, PB5 = MOSI, SPI mode 1, 10.625 MHz
  *    Frame: D[13:0] angle, Mg[3:0] status, CRC[5:0] (x^6+x+1)
  * ========================================================================== */
-#define ENC_POLE_PAIRS          7               /* motor pole pairs */
+#define ENC_POLE_PAIRS          MOTOR_POLE_PAIRS  /* -> motor_cfg.h */
 #define ENC_DIR_DEFAULT         0u              /* 0 = CCW positive */
 
 /* Zero offset + direction live in their own page so the current-calibration
@@ -319,13 +321,13 @@ extern "C" {
 #define FOC_VDC_NOMINAL         12.0f
 #define FOC_M_MAX               0.95f    /* 0.5*Vdc*0.95 = 5.7 V phase amp */
 #define FOC_V_LIM               5.7f
-#define FOC_KP                  3.00f
-#define FOC_KI                  11000.0f
+#define FOC_KP                  MOTOR_FOC_KP      /* -> motor_cfg.h */
+#define FOC_KI                  MOTOR_FOC_KI      /* -> motor_cfg.h */
 /* S7.2 feedforward. K_emf from KV: 330 rpm/V -> 3.03 mV per mechanical rpm,
  * and w_e = rpm*7*2*pi/60 = rpm*0.733 rad/s, so 4.13 mV per electrical rad/s.
  * (The first estimate of 3.98 used 220 Hz for a speed that was really ~175 Hz.) */
-#define FOC_K_EMF               0.00413f  /* V per electrical rad/s     */
-#define FOC_L_H                 0.0005f   /* phase inductance, H        */
+#define FOC_K_EMF               MOTOR_KE_V_RAD_S  /* V per elec rad/s */
+#define FOC_L_H                 MOTOR_L_H         /* phase inductance, H */
 #define FOC_FF_GAIN             1.0f      /* 0 = off, 1 = full          */
 #define FOC_FF_LO_W             100.0f    /* FF fades in above 16 Hz elec */
 #define FOC_FF_HI_W             300.0f    /* FF full above 48 Hz elec     */
@@ -335,8 +337,8 @@ extern "C" {
 #define SPD_FREQ_HZ             1000u
 #define SPD_DIV                 (FOC_FREQ_HZ / SPD_FREQ_HZ)
 #define SPD_TS_S                (1.0f / (float)SPD_FREQ_HZ)
-#define SPD_KP                  0.006f    /* A per rpm, measured best with sstep */
-#define SPD_KI                  0.080f    /* A per (rpm*s)                */
+#define SPD_KP                  MOTOR_SPD_KP      /* A per rpm */
+#define SPD_KI                  MOTOR_SPD_KI      /* A per (rpm*s) */
 #define SPD_FF_BASE             0.04f     /* friction feedforward, A     */
 #define SPD_FF_SLOPE            0.0f      /* A per rpm (not measurable)  */
 #define SPD_KICK                0.20f     /* breakaway current, A        */
@@ -352,7 +354,7 @@ extern "C" {
 /* Acceleration feedforward: iq needs J/Kt amperes per rad/s^2 to follow the
  * reference ramp. J/Kt = 9e-5 / 0.0289 = 3.1e-3. Without it the integrator
  * had to build ~0.2 A during the ramp and the 100 rpm step overshot ~96%. */
-#define SPD_FF_ACC              0.0031f  /* A per rad/s^2 */
+#define SPD_FF_ACC              MOTOR_FF_ACC_A_RADS2  /* A per rad/s^2 */
 /* Gain scheduling. At high speed the 10 ms speed window leaves a ripple at
  * the electrical frequency (58 Hz at 500 rpm) and a high Kp turns it into
  * a current ripple (measured 0.69 A with kp 0.016 vs 0.07 A with 0.004).
@@ -371,7 +373,7 @@ extern "C" {
 #define SPD_LPF_LO_K            0.30f    /* no filter below LO         */
 #define SPD_LPF_HI_K            0.10f    /* ~8 Hz above HI             */
 #define RIP_WINDOW_MS           500u    /* ripple measurement window */
-#define SPD_RPM_MAX             2000.0f   /* target limit                */
+#define SPD_RPM_MAX             MOTOR_RPM_MAX     /* target limit */
 /* sstep: settle first, then step the speed reference and record. */
 #define SSTEP_SETTLE_MS         300u
 #define SSTEP_SETTLE_MAX_MS     10000u   /* give up waiting after this */
@@ -380,7 +382,7 @@ extern "C" {
 #define SSTEP_RECORD_MS         2000u
 
 
-#define FOC_I_MAX_A             1.20f    /* reference vector limit (ADC +-1.32 A) */
+#define FOC_I_MAX_A             MOTOR_I_MAX_A     /* reference vector limit */
 /* Runtime tuning limits for the "pi" command. */
 #define FOC_KP_MIN              0.05f
 #define FOC_KP_MAX              20.0f
@@ -391,7 +393,7 @@ extern "C" {
 #define STEP_SETTLE_MS          100u
 #define STEP_RECORD_MS          20u
 
-#define FOC_I_TRIP_A            1.28f    /* abort above this */
+#define FOC_I_TRIP_A            MOTOR_I_TRIP_A    /* abort above this */
 #define FOC_TRIP_FRAMES         5u
 
 /* Read the encoder every N control frames (1 = 20kHz). */
@@ -420,11 +422,13 @@ extern "C" {
 
 
 /* ==========================================================================
- * 8. Motor parameters (placeholders until measured)
+ * 8. Motor parameters -> moved to motor_cfg.h (S10.0)
+ *
+ * Everything that changes when the motor changes lives in that one file:
+ * pole pairs, R, L, KE, J, current limits and top speed. This header only
+ * aliases them (see ENC_POLE_PAIRS / FOC_* / SPD_* above), so a motor swap
+ * does not touch board_cfg.h at all.
  * ========================================================================== */
-#define MOTOR_POLE_PAIRS        7u              /* [TBD] pole pairs */
-#define MOTOR_RS_OHM            0.5f            /* [TBD] phase resistance */
-#define MOTOR_LS_H              0.001f          /* [TBD] phase inductance */
 
 #ifdef __cplusplus
 }
