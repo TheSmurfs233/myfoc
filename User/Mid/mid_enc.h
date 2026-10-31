@@ -49,6 +49,9 @@ const mid_enc_t *mid_enc_info(void);
 
 /* Current mechanical angle becomes electrical zero. Persists to flash. */
 /* Speed source: 0 = 10 ms window, 1 = PLL observer (S8.1). */
+void    mid_enc_set_enabled(uint8_t en);   /* 0 = no encoder fitted */
+uint8_t mid_enc_enabled(void);
+
 void    mid_enc_set_spd_src(uint8_t src);
 uint8_t mid_enc_spd_src(void);
 /* Window estimator result, kept for comparison. */

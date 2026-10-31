@@ -1141,7 +1141,8 @@ static void task_foc(uint32_t t_pick)
      * Using the bad-frame counter was wrong: while the encoder is healthy
      * that counter never changes, so the "stuck" timer fired 20 frames
      * after start (measured: false encoder fault at 1 ms). ---- */
-    if ((s_if.run == 0u) && (s_sfoc == 0u)) {
+    if ((s_if.run == 0u) && (s_sfoc == 0u) &&
+        (mid_enc_enabled() != 0u)) {
         if (e->frames != s_prot_bad_seen) {
             s_prot_bad_seen = e->frames;
             s_prot_enc_cnt  = 0u;
@@ -1973,7 +1974,7 @@ static float prot_speed_rpm(void)
 {
     const mid_enc_t *e = mid_enc_info();
 
-    if (e->valid != 0u) {
+    if ((mid_enc_enabled() != 0u) && (e->valid != 0u)) {
         return e->spd_rpm;
     }
     if (s_sfoc != 0u) {

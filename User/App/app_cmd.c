@@ -1116,6 +1116,18 @@ static float   s_pll_zeta = PLL_ZETA;
 
     /* ---------------- enc ----------------- */
     else if (strcmp(tok[0], "enc") == 0) {
+        /* enc off / enc on: no encoder fitted (sensorless build). */
+        if ((n == 2u) && (strcmp(tok[1], "off") == 0)) {
+            mid_enc_set_enabled(0u);
+            log_printf("OK enc off: encoder disabled");
+            return;
+        }
+        if ((n == 2u) && (strcmp(tok[1], "on") == 0)) {
+            mid_enc_set_enabled(1u);
+            log_printf("OK enc on");
+            return;
+        }
+
         const mid_enc_t *e = mid_enc_info();
 
         if ((n >= 3u) && (strcmp(tok[1], "zero") == 0)) {

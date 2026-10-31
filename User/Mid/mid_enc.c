@@ -37,6 +37,10 @@ typedef struct {
     uint16_t pad;
 } enc_record_t;
 
+/* Encoder subsystem switch: a sensorless build runs with no encoder
+ * at all ("enc off"). */
+static uint8_t s_enc_enabled = 1u;
+
 static mid_enc_t s_enc;
 static float    s_zero_rad;   /* zero_deg converted once */
 
@@ -192,6 +196,10 @@ void mid_enc_update(void)
     float    elec;
 
     rc = bsp_ssi_poll(f);
+    if (s_enc_enabled == 0u) {
+        return;                  /* no encoder: nothing to read */
+    }
+
     if (rc == 0u) {
         /* Nothing ready. Two very different cases:
          *  - a transfer is still armed  -> the DMA missed its slot (late)
@@ -335,6 +343,16 @@ void mid_enc_update(void)
 
     s_enc.valid = 1u;
 }
+
+void mid_enc_set_enabled(uint8_t en)
+{
+    s_enc_enabled = (en != 0u) ? 1u : 0u;
+    if (s_enc_enabled == 0u) {
+        s_enc.valid = 0u;        /* a dead link must never look valid */
+    }
+}
+
+uint8_t mid_enc_enabled(void) { return s_enc_enabled; }
 
 void mid_enc_set_spd_src(uint8_t src)
 {
