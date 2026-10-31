@@ -1007,7 +1007,13 @@ static float   s_pll_zeta = PLL_ZETA;
             {
                 float eq_a3 = sqrtf((o->e_alpha * o->e_alpha) +
                                     (o->e_beta  * o->e_beta));   /* |e| */
-                float w_a3  = (o->omega_e > 0.0f) ? o->omega_e : -o->omega_e;
+                /* Same reference as the hand-over criterion: while the I/f
+                 * is dragging use its commanded speed, otherwise the
+                 * observer's own (there is nothing better to compare with). */
+                float rpm_d = (double)app_if_freq_hz() * (60.0 / 7.0);
+                float w_a3  = (app_if_on() != 0u)
+                            ? (rpm_d * 0.104719755120f * 7.0f)
+                            : ((o->omega_e > 0.0f) ? o->omega_e : -o->omega_e);
                 float ex_a3 = w_a3 * MOTOR_KE_V_RAD_S;
                 float r3    = (ex_a3 > 0.05f) ? (eq_a3 / ex_a3) : 0.0f;
 

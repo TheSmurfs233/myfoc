@@ -1402,8 +1402,14 @@ static void task_foc(uint32_t t_pick)
                  * eq (which collapses at 90 deg and made this criterion flaky). */
                 float e_mag  = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
                                      (s_obs.e_beta  * s_obs.e_beta));
-                float w_a2   = (s_obs.omega_e > 0.0f) ? s_obs.omega_e : -s_obs.omega_e;
-                float eq_ex2 = w_a2 * MOTOR_KE_V_RAD_S;
+                /* Expected back-EMF at the DRAG speed, not at the
+                 * observer's own estimate: validating the observer against
+                 * itself fails whenever its omega drifts up during the
+                 * forced run (measured 13:21: one start handed over, the
+                 * next sat in "watching" at 600 rpm). */
+                float rpm_abs = (rpm_if > 0.0f) ? rpm_if : -rpm_if;
+                float w_exp   = rpm_abs * 0.104719755120f * (float)ENC_POLE_PAIRS;
+                float eq_ex2  = w_exp * MOTOR_KE_V_RAD_S;
 
                 if ((e_mag > OBS_E_MIN_V) &&
                     (fabsf(rpm_if) > HO_MIN_RPM) &&
