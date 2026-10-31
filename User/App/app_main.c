@@ -1127,17 +1127,21 @@ static void task_foc(uint32_t t_pick)
     uint8_t  i;
 
     /* No encoder frame yet: hold the zero vector rather than invent an angle.
-     * S10.4: unless I/f is driving, in which case the angle is ours. */
-    if ((e->valid == 0u) && (s_if.run == 0u)) {
+     * Exceptions: the I/f ramp (S10.4) and the sensorless mode (S10.5) supply
+     * their own angle, so they must work with no encoder fitted at all. */
+    if ((e->valid == 0u) && (s_if.run == 0u) && (s_sfoc == 0u)) {
         bsp_pwm_set_all_duty(PWM_START_DUTY);
         return;
     }
 
+    /* ---- encoder liveness: only meaningful when the encoder is the angle
+     * source. In sensorless mode it must be skipped: with no encoder fitted
+     * the frame counter never advances and this would fault at once. ---- */
     /* ---- encoder liveness: count frames without a NEW good one.
      * Using the bad-frame counter was wrong: while the encoder is healthy
      * that counter never changes, so the "stuck" timer fired 20 frames
      * after start (measured: false encoder fault at 1 ms). ---- */
-    if (s_if.run == 0u) {
+    if ((s_if.run == 0u) && (s_sfoc == 0u)) {
         if (e->frames != s_prot_bad_seen) {
             s_prot_bad_seen = e->frames;
             s_prot_enc_cnt  = 0u;
@@ -1974,6 +1978,11 @@ static float prot_speed_rpm(void)
     }
     if (s_sfoc != 0u) {
         return s_obs.omega_e * 9.54929658551372f / (float)ENC_POLE_PAIRS;
+    }
+    if (s_if.run != 0u) {
+        /* I/f drag: the commanded frequency is the best estimate we have,
+         * otherwise the stall judge would see 0 rpm and trip. */
+        return s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
     }
     return 0.0f;
 }
