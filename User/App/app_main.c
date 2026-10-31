@@ -2244,15 +2244,19 @@ static void task_wave(uint32_t now)
         float th_deg = 0.0f;
         float hz_use = 0.0f;
 
-        if (s_sfoc != 0u) {
+        /* Encoder first: while it is fitted, ch8/ch9 stay the raw encoder
+         * reference so they can be compared against the observer (ch19) and
+         * its difference (ch20). Only when the encoder is gone do they fall
+         * back to whatever drives the loop, so they are never dead. */
+        if ((mid_enc_enabled() != 0u) && (mid_enc_info()->valid != 0u)) {
+            th_deg = mid_enc_info()->elec_deg;
+            hz_use = mid_enc_info()->spd_hz;
+        } else if (s_sfoc != 0u) {
             th_deg = s_obs.theta_out * 57.29577951308232f;
             hz_use = s_obs.omega_e / 6.283185307179586f;
         } else if (s_if.run != 0u) {
             th_deg = s_if.theta * 57.29577951308232f;
             hz_use = s_if.f_hz;
-        } else if (mid_enc_enabled() != 0u) {
-            th_deg = mid_enc_info()->elec_deg;
-            hz_use = mid_enc_info()->spd_hz;
         }
 
         ch[8] = th_deg;
