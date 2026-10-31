@@ -2235,11 +2235,29 @@ static void task_wave(uint32_t now)
     ch[4] = cs->ia;                    /* phase currents, A    */
     ch[5] = cs->ib;
     ch[6] = cs->ic;
-    /* S5: encoder angles and speed so VOFA+ can compare them with the
-     * commanded V/f frequency (same unit: electrical Hz). */
     ch[7] = mid_enc_info()->mech_deg;
-    ch[8] = mid_enc_info()->elec_deg;
-    ch[9] = mid_enc_info()->spd_hz;
+    {
+        /* ch8/ch9 follow the SAME priority as the control loop
+         * (observer -> I/f -> encoder), so they stay meaningful with no
+         * encoder fitted ("enc off"). ch7 is the raw mechanical angle and
+         * therefore encoder-only. */
+        float th_deg = 0.0f;
+        float hz_use = 0.0f;
+
+        if (s_sfoc != 0u) {
+            th_deg = s_obs.theta_out * 57.29577951308232f;
+            hz_use = s_obs.omega_e / 6.283185307179586f;
+        } else if (s_if.run != 0u) {
+            th_deg = s_if.theta * 57.29577951308232f;
+            hz_use = s_if.f_hz;
+        } else if (mid_enc_enabled() != 0u) {
+            th_deg = mid_enc_info()->elec_deg;
+            hz_use = mid_enc_info()->spd_hz;
+        }
+
+        ch[8] = th_deg;
+        ch[9] = hz_use;   /* electrical Hz of whatever drives the loop */
+    }
     /* S6: FOC currents and references. Plotting the measured and the
      * commanded value together is what makes a current step visible. */
     ch[10] = s_foc_info.id;              /* measured id, A   */
