@@ -54,6 +54,9 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 /* ---- open-loop V/f (S4) ---- */
 static alg_vf_t      s_vf;
 static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
+static uint8_t       s_coast;     /* #168: no angle source, rotor still
+                                   * turning -> zero current, no short  */
+static uint32_t      s_coast_ticks;
 /* S10.5 hand-over */
 static uint8_t   s_sfoc;      /* 1 = sensorless: angle and speed from the observer */
 static uint8_t   s_ho_state;   /* 0 idle, 1 watching, 2 blending, 3 done */
@@ -725,6 +728,8 @@ uint8_t app_start(void)
     s_prot_enc_cnt  = 0u;
     s_prot_enc_zero_cnt = 0u;
     s_prot_bad_seen = mid_enc_info()->frames;
+    s_coast         = 0u;                /* #168: start from the zero vector */
+    s_coast_ticks   = 0u;
     if (mid_current_get()->ready == 0u) {
         mid_current_restart_cal();
     }
@@ -751,6 +756,8 @@ uint8_t app_stop(void)
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
     foc_info_clear_meas();               /* #167: no stale display */
+    s_coast            = 0u;             /* #168: nothing to coast */
+    s_coast_ticks      = 0u;
     s_foc_info.ready   = 0u;
     s_foc_trip_cnt     = 0u;
     s_vf_info.on       = 0u;
@@ -833,6 +840,8 @@ void app_fault_raise(uint8_t code, float value)
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
     foc_info_clear_meas();               /* #167: no stale display */
+    s_coast            = 0u;             /* #168: nothing to coast */
+    s_coast_ticks      = 0u;
     s_step_phase       = 0u;
     alg_foc_reset(&s_foc);
 
@@ -1155,14 +1164,46 @@ static void task_foc(uint32_t t_pick)
     float k;
     uint32_t t_comp;
     uint8_t  i;
+    uint8_t  coast = 0u;             /* #168: coasting, no angle source */
 
     /* No encoder frame yet: hold the zero vector rather than invent an angle.
      * Exceptions: the I/f ramp (S10.4) and the sensorless mode (S10.5) supply
-     * their own angle, so they must work with no encoder fitted at all. */
+     * their own angle, so they must work with no encoder fitted at all.
+     *
+     * S10.10 (#168): "no angle source but the rotor still turns" used to land
+     * here too, and the zero vector is a three-phase SHORT: measured 1.316 A
+     * of back-EMF current at 1500 rpm (trip 1.28 A) and a hard brake. So when
+     * back-EMF is present, keep the loop closed at zero current on the
+     * observer angle; only drop to the zero vector once the rotor has
+     * stopped. |e| is the criterion, never the observer's omega. */
     if ((e->valid == 0u) && (s_if.run == 0u) && (s_sfoc == 0u)) {
-        bsp_pwm_set_all_duty(PWM_START_DUTY);
-        foc_info_clear_meas();           /* #167: zero vector, zero display */
-        return;
+        float em2 = (s_obs.e_alpha * s_obs.e_alpha)
+                  + (s_obs.e_beta  * s_obs.e_beta);
+
+        if ((s_coast == 0u) && (s_obs_on != 0u) && (em2 > COAST_E_MIN2)) {
+            s_coast       = 1u;
+            s_coast_ticks = 0u;
+        }
+        if (s_coast != 0u) {
+            s_coast_ticks++;
+            if ((em2 < COAST_E_MIN2) || (s_coast_ticks > COAST_TICKS_MAX)) {
+                s_coast = 0u;
+            }
+        }
+        if (s_coast == 0u) {
+            bsp_pwm_set_all_duty(PWM_START_DUTY);
+            foc_info_clear_meas();       /* #167: zero vector, zero display */
+            return;
+        }
+
+        /* Coast: cancel the back-EMF with zero current, do not short it. */
+        coast      = 1u;
+        id_ref     = 0.0f;
+        iq_ref     = 0.0f;
+        s_foc_info.id_ref  = 0.0f;
+        s_foc_info.iq_ref  = 0.0f;
+        s_foc_info.spd_rpm = s_obs.omega_e * 9.54929658551372f
+                           / (float)ENC_POLE_PAIRS;
     }
 
     /* ---- encoder liveness: only meaningful when the encoder is the angle
@@ -1575,8 +1616,9 @@ static void task_foc(uint32_t t_pick)
         float th_use;
         float we_use;
 
-        if (s_sfoc != 0u) {
-            /* True sensorless: the observer supplies the angle. */
+        if ((coast != 0u) || (s_sfoc != 0u)) {
+            /* True sensorless, or coasting after a release with no encoder:
+             * the observer supplies the angle. */
             th_use = s_obs.theta_out;
             we_use = s_obs.omega_e;
         } else if (s_if.run == 0u) {

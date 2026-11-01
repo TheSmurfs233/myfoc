@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             167u
+#define FW_BUILD_ID             168u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -362,6 +362,17 @@ extern "C" {
 #define HO_BLEND_S              ((float)HO_BLEND_MS * 0.001f)
 #define OBS_E_MIN_V             0.50f
 #define IF_RPM_MAX             600.0f   /* ceiling for the "if" command */
+
+/* S10.10: coasting with no angle source (#168).
+ * After "sfoc off" (or any release) with the encoder disabled there is no
+ * angle to commutate on.  The old code commanded the active zero vector,
+ * which is a three-phase short: at 1500 rpm the back-EMF drove 1.316 A
+ * through the windings (trip is 1.28 A) and braked the rotor.  Now the
+ * current loop stays closed at zero current on the observer angle for as
+ * long as the back-EMF is present.  |e| is the only honest "still turning"
+ * signal: the observer's omega drifts to ~1000 rpm at standstill. */
+#define COAST_E_MIN2            0.04f    /* (0.20 V)^2 back-EMF window     */
+#define COAST_TICKS_MAX         100000u  /* 5 s at 20 kHz, then give up    */
 
 /* ==========================================================================
  * S10.1: back-EMF observer (shadow mode)
