@@ -438,13 +438,26 @@ static float   s_pll_zeta = PLL_ZETA;
             } else {
                 switch (app_spd_set(rpm)) {
                 case 0u:
-                    log_printf("OK spd target = %d rpm", (int)rpm);
+                    /* Name the feedback source: inside sensorless mode the
+                     * speed loop uses the observer, and the reply used to
+                     * look identical to the encoder case. */
+                    log_printf("OK spd target = %d rpm (%s)", (int)rpm,
+                               (app_sfoc_on() != 0u) ? "observer"
+                                                     : "encoder");
                     break;
                 case 2u:
                     log_printf("ERR start first");
                     break;
                 case 4u:
                     log_printf("ERR mode 2 first (FOC)");
+                    break;
+                case 6u:
+                    log_printf("ERR no encoder: use 'sfoc go <rpm>' "
+                               "or 'enc on'");
+                    break;
+                case 7u:
+                    log_printf("ERR I/f running, wait for hand-over "
+                               "(or use 'sfoc go')");
                     break;
                 default:
                     log_printf("ERR speed too high, |rpm| <= %d", (int)SPD_RPM_MAX);
@@ -959,6 +972,11 @@ static float   s_pll_zeta = PLL_ZETA;
 
             if (!parse_num(tok[2], &rpm)) {
                 log_printf("ERR usage=sfoc go <rpm>");
+            } else if ((rpm != 0.0f) && (fabsf(rpm) < SFOC_RPM_MIN)) {
+                /* The observer cannot hold lock this slow: the back-EMF
+                 * is below the usable range. Refuse instead of going
+                 * sensorless and dropping out a second later. */
+                log_printf("ERR sensorless needs |rpm| >= %d", (int)SFOC_RPM_MIN);
             } else if (app_sfoc_on() != 0u) {
                 /* Ask THIS first: app_if_start() used to sit in the
                  * condition below, so it started the I/f even when the

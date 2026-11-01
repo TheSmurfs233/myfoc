@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             164u
+#define FW_BUILD_ID             165u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -335,6 +335,10 @@ extern "C" {
  * ~74 deg - the forced frame is not where the rotor is. Judge the observer
  * instead: enough back-EMF, enough speed, PLL locked. */
 #define HO_MIN_RPM              250.0f  /* below this the back-EMF is too weak */
+/* Lowest speed the closed sensorless loop may be asked for. Below this the
+ * back-EMF is too small for the observer to stay locked; 300 rpm is the
+ * documented floor (decision 2 of the S10 plan). */
+#define SFOC_RPM_MIN            300.0f
 /* Loss of lock: compare |eq| against what the reported speed implies.
  * An absolute threshold is wrong: during the startup ramp eq starts at 0
  * and grows with the speed, so it is legitimately small (measured 05:35:

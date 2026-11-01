@@ -958,6 +958,16 @@ uint8_t app_spd_set(float rpm)
         return 0u;
     }
 
+    /* "spd" is the ENCODER speed loop. Two ways it used to lie:
+     *  - with no encoder the frame hold returns before the loop acts,
+     *    so it printed OK and the motor did not move (measured 20:32
+     *    on #164: stop, start, "spd 200" -> nothing);
+     *  - during the I/f ramp the forced frame overwrites idq on every
+     *    frame, so the speed output was discarded too.
+     * Say so instead of accepting the command. "spd 0" still releases. */
+    if ((s_sfoc == 0u) && (s_if.run != 0u)) { return 7u; }
+    if ((s_sfoc == 0u) && (mid_enc_enabled() == 0u)) { return 6u; }
+
     /* The reference itself is ramped in the 1 kHz task; the kick window
      * starts now so the rotor breaks free before the ramp asks for speed. */
     s_spd_target   = rpm;
