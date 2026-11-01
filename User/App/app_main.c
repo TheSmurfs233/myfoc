@@ -1149,6 +1149,18 @@ static void task_foc(uint32_t t_pick)
         } else if (s_prot_enc_cnt < 0xFFFFu) {
             s_prot_enc_cnt++;
             if (s_prot_enc_cnt >= PROT_ENC_FRAMES) {
+                if (mid_enc_seen_ok() == 0u) {
+                    /* Never decoded a real frame since boot: no encoder on
+                     * the bus. Drop out of encoder mode instead of faulting
+                     * so "sfoc go" is still reachable. A real mid-run
+                     * failure still faults. */
+                    mid_enc_set_enabled(0u);
+                    s_prot_enc_cnt      = 0u;
+                    s_prot_enc_zero_cnt = 0u;
+                    log_printf("warn no encoder frames, encoder off "
+                               "(enc on to re-enable)");
+                    return;
+                }
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
                 return;
             }
@@ -1165,6 +1177,18 @@ static void task_foc(uint32_t t_pick)
                 s_prot_enc_zero_cnt++;
             }
             if (s_prot_enc_zero_cnt >= (uint16_t)PROT_ENC_ZERO_FRAMES) {
+                if (mid_enc_seen_ok() == 0u) {
+                    /* All-zero frames and never a good one: the bus is
+                     * idle (no encoder fitted). Measured 20:22 on #163:
+                     * "start" faulted 10 ms in, before "sfoc go" could
+                     * switch to sensorless. */
+                    mid_enc_set_enabled(0u);
+                    s_prot_enc_cnt      = 0u;
+                    s_prot_enc_zero_cnt = 0u;
+                    log_printf("warn no encoder frames, encoder off "
+                               "(enc on to re-enable)");
+                    return;
+                }
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
                 return;
             }

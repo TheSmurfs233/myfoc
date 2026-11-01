@@ -465,3 +465,19 @@ id ≈ iq · sin(Δθ)
 - `alg_pll.c`：S8.1 的 PLL（观测器直接复用）
 - `31_参数表.md`：现有 `FOC_K_EMF`、`FOC_L_H` 等
 - `32_调试指南.md`：抖动/失步的排查方法
+
+### S10.6b 无编码器时的启动路径（#164）
+
+`start` 一执行就会做编码器存活检测（`PROT_ENC_FRAMES` / `PROT_ENC_ZERO_FRAMES`）。
+没装编码器时全零帧能骗过 CRC，10 ms 内就跳 `FAULT_ENCODER`，
+用户还没来得及 `sfoc go`，无感模式进不去。
+
+现在用 `mid_enc_seen_ok()` 区分：
+
+| 情况 | 动作 |
+|---|---|
+| 开机后**从未**收到非零且 CRC 正确的帧 | 自动 `mid_enc_set_enabled(0)`，打警告，不跳闸 |
+| 之前正常、运行中变全零/无更新 | 仍然 `FAULT_ENCODER` |
+
+于是标准流程简化为：`mode 2` → `start` → `sfoc go <rpm>`，
+有没有编码器都不用先手动 `enc off`。

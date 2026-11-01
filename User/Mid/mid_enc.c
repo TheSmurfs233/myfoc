@@ -42,6 +42,10 @@ typedef struct {
 static uint8_t s_enc_enabled = 1u;
 
 static mid_enc_t s_enc;
+/* 1 = a frame with a plausible angle and a good CRC has been seen since
+ * boot. Used to tell "no encoder fitted" (all-zero frames) from "the
+ * encoder died" so the former can fall back instead of faulting. */
+static uint8_t   s_raw_seen_ok;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
@@ -224,6 +228,9 @@ void mid_enc_update(void)
     s_enc.raw    = d;
     s_enc.mg     = mg;
     s_enc.crc_ok = (mid_enc_crc6(w >> 6) == crc_rx) ? 1u : 0u;
+    if ((d != 0u) && (s_enc.crc_ok != 0u)) {
+        s_raw_seen_ok = 1u;      /* a real encoder is answering */
+    }
     if (s_enc.crc_ok == 0u) {
         s_enc.crc_errs++;
     }
@@ -353,6 +360,8 @@ void mid_enc_set_enabled(uint8_t en)
 }
 
 uint8_t mid_enc_enabled(void) { return s_enc_enabled; }
+
+uint8_t mid_enc_seen_ok(void) { return s_raw_seen_ok; }
 
 void mid_enc_set_spd_src(uint8_t src)
 {

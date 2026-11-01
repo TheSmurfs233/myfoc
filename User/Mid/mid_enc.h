@@ -52,6 +52,10 @@ const mid_enc_t *mid_enc_info(void);
 void    mid_enc_set_enabled(uint8_t en);   /* 0 = no encoder fitted */
 uint8_t mid_enc_enabled(void);
 
+/** @return 1 once a non-zero angle with a good CRC has been decoded
+ *  since boot (i.e. an encoder really answered at least once). */
+uint8_t mid_enc_seen_ok(void);
+
 void    mid_enc_set_spd_src(uint8_t src);
 uint8_t mid_enc_spd_src(void);
 /* Window estimator result, kept for comparison. */
