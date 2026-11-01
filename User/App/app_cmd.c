@@ -163,7 +163,7 @@ static void print_help(void)
     log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
     log_printf(" sfoc <go|off>  I/f then hand over to the observer (S10.5)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
-    log_printf(" wave <on|off>  VOFA+ waveform upload");
+    log_printf(" wave <on [hz]|off>  waveform upload (21ch needs <=250)");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
     log_printf(" clr            clear counters");
     log_printf(" echo <text>    loopback test");
@@ -966,7 +966,9 @@ static float   s_pll_zeta = PLL_ZETA;
         if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
             app_if_stop();
             app_ho_reset();        /* idle, not watching */
-            log_printf("OK sfoc off (encoder mode)");
+            log_printf("OK sfoc off (%s)", (mid_enc_enabled() != 0u)
+                       ? "encoder mode"
+                       : "released, no encoder: use 'sfoc go'");
         } else if ((n >= 3u) && (strcmp(tok[1], "go") == 0)) {
             float rpm;
 
@@ -1334,16 +1336,30 @@ static float   s_pll_zeta = PLL_ZETA;
     }
     /* ---------------- wave ---------------- */
     else if (strcmp(tok[0], "wave") == 0) {
-        if (n < 2u) { log_printf("ERR usage=wave <on|off>"); }
+        if (n < 2u) { log_printf("ERR usage=wave <on [hz]|off>"); }
         else if (strcmp(tok[1], "on") == 0) {
-            app_wave_set(1u, app_status()->wave_rate_hz);
+            uint16_t rate = app_status()->wave_rate_hz;
+
+            /* #167: 21 channels at 500 Hz is ~685 kbit/s (137 B/frame) on a
+             * 1 Mbaud link, i.e. 69% of it;
+             * the DAPLink VCP then overflows and the host sees truncated
+             * frames ("214.927,0"). Allow the rate to follow the channel
+             * count: "wave on 250". */
+            if (n >= 3u) {
+                if (!parse_u32(tok[2], &val)) {
+                    log_printf("ERR usage=wave on [hz]");
+                    return;
+                }
+                rate = (uint16_t)val;
+            }
+            app_wave_set(1u, rate);
             log_printf("OK wave ON @ %u Hz, select FireWater in VOFA+",
                        (unsigned)app_status()->wave_rate_hz);
         } else if (strcmp(tok[1], "off") == 0) {
             app_wave_set(0u, app_status()->wave_rate_hz);
             log_printf("OK wave OFF");
         } else {
-            log_printf("ERR usage=wave <on|off>");
+            log_printf("ERR usage=wave <on [hz]|off>");
         }
     }
     /* ---------------- rate ---------------- */

@@ -1579,7 +1579,7 @@ static void test_cmd(void)
     T(tx_contains("---- commands ----"));
     T(tx_contains("mode <0|1|2>"));
     T(tx_contains("pwm <d>"));
-    T(tx_contains("wave <on|off>"));
+    T(tx_contains("wave <on [hz]|off>"));
     if (g_fails != g_fail_mark) { tx_dump_on_fail(); }
     section_end();
 
@@ -2561,6 +2561,38 @@ static void test_cmd(void)
         sp.spd_f   = 310.0f;
         u = alg_spd_step(&sp, 310.0f, 0.001f);
         T(u < -1.0f);              /* that is the kick the preload removes */
+    }
+    section_end();
+
+    section("spd: accel feedforward is clamped to the ramp rate");
+    {
+        alg_spd_t sp;
+        float u1, u2;
+
+        alg_spd_init(&sp, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f, 0.0f, 30.0f);
+        sp.ff_acc   = 3.11e-3f;
+        sp.acc_max  = 62.83f;      /* 600 rpm/s in rad/s^2 */
+        sp.on       = 1u;
+        sp.spd_ref  = 200.0f;
+        sp.ref_prev = 200.0f;
+
+        /* One ramp step per call: 0.6 rpm in 1 ms. */
+        sp.spd_ref = 200.6f;
+        u1 = alg_spd_step(&sp, 200.6f, 0.001f);
+
+        /* A call that catches two steps must not double the feedforward
+         * (the on-board +0.20 A spike every 40 ms). */
+        sp.spd_ref = 201.8f;
+        u2 = alg_spd_step(&sp, 201.8f, 0.001f);
+
+        T(u1 > 0.15f && u1 < 0.25f);
+        T(fabsf(u2 - u1) < 0.02f);
+
+        /* Without the clamp the same call does double. */
+        sp.acc_max  = 0.0f;
+        sp.ref_prev = 200.6f;
+        sp.spd_ref  = 201.8f;
+        T(alg_spd_step(&sp, 201.8f, 0.001f) > (1.5f * u1));
     }
     section_end();
 

@@ -42,6 +42,7 @@ void alg_spd_init(alg_spd_t *s, float kp, float ki, float out_max,
     s->spd_f         = 0.0f;
     s->out_max  = (out_max  > 0.0f) ? out_max  : 1.0f;
     s->ff_acc   = 0.0f;
+    s->acc_max  = 0.0f;
     s->ref_prev = 0.0f;
 
     alg_spd_reset(s);
@@ -169,6 +170,18 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
     if (s->ff_acc > 0.0f) {
         float alpha = ((ref - s->ref_prev) / ts) * (6.2831853f / 60.0f);
 
+        /* #167: the reference is ramped in the App's 1 ms task while this loop
+         * has its own 1 kHz tick. The two are not phase locked, so now and then
+         * one call catches two ramp steps and the derivative doubles: measured
+         * +0.20 A for a single sample every 40 ms during a 600 rpm/s ramp.
+         * Clamping to the configured ramp rate removes the spike without
+         * touching the steady-state feedforward. */
+        if ((s->acc_max > 0.0f) && (alpha > s->acc_max)) {
+            alpha = s->acc_max;
+        }
+        if ((s->acc_max > 0.0f) && (alpha < -s->acc_max)) {
+            alpha = -s->acc_max;
+        }
         u += s->ff_acc * alpha;
     }
     s->ref_prev = ref;

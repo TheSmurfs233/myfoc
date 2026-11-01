@@ -71,6 +71,18 @@ static app_vf_info_t s_vf_info;
 /* ---- FOC current loop (S6) ---- */
 static alg_foc_t      s_foc;
 static app_foc_info_t s_foc_info;
+
+/* #167: id/iq/vd/vq are written by the FOC step. When the bridge is off (stop,
+ * fault, or no angle source at all) nothing refreshes them, so the waveform
+ * kept showing "iq 0.07 A" on a drive whose duties were 50/50/50. */
+static void foc_info_clear_meas(void)
+{
+    s_foc_info.id = 0.0f;
+    s_foc_info.iq = 0.0f;
+    s_foc_info.vd = 0.0f;
+    s_foc_info.vq = 0.0f;
+    s_foc_info.m  = 0.0f;
+}
 static uint8_t        s_foc_trip_cnt;
 
 /* S7.6 protections. */
@@ -314,6 +326,9 @@ void app_init(void)
     alg_spd_set_sched(&s_spd, SPD_GAIN_LO_RPM, SPD_GAIN_HI_RPM, SPD_GAIN_HI_SCALE);
     alg_spd_set_lpf(&s_spd, SPD_LPF_LO_RPM, SPD_LPF_HI_RPM, SPD_LPF_LO_K, SPD_LPF_HI_K);
     s_spd.ff_acc = SPD_FF_ACC;
+    /* #167: clamp the acceleration feedforward to the ramp rate it is meant
+     * to compensate (see alg_spd_step). */
+    s_spd.acc_max = s_spd_ramp_hz * 0.104719755f;
     s_spd_div = 0u;
     s_foc.ff_lo = FOC_FF_LO_W;
     s_foc.ff_hi = FOC_FF_HI_W;
@@ -735,6 +750,7 @@ uint8_t app_stop(void)
     s_fault.value      = 0.0f;
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
+    foc_info_clear_meas();               /* #167: no stale display */
     s_foc_info.ready   = 0u;
     s_foc_trip_cnt     = 0u;
     s_vf_info.on       = 0u;
@@ -816,6 +832,7 @@ void app_fault_raise(uint8_t code, float value)
     app_spd_off();
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
+    foc_info_clear_meas();               /* #167: no stale display */
     s_step_phase       = 0u;
     alg_foc_reset(&s_foc);
 
@@ -1144,6 +1161,7 @@ static void task_foc(uint32_t t_pick)
      * their own angle, so they must work with no encoder fitted at all. */
     if ((e->valid == 0u) && (s_if.run == 0u) && (s_sfoc == 0u)) {
         bsp_pwm_set_all_duty(PWM_START_DUTY);
+        foc_info_clear_meas();           /* #167: zero vector, zero display */
         return;
     }
 
@@ -1681,9 +1699,9 @@ static void task_vf(uint32_t t_pick)
 
 void app_wave_set(uint8_t on, uint16_t rate_hz)
 {
-    /* FireWater CSV: 6 channels ~ 44B/frame, so 500Hz is ~22kB/s
-     * (22% of a 1Mbaud link). HAL_GetTick only resolves 1ms, so 1000Hz would
-     * leave no margin at all. */
+    /* FireWater CSV: 21 channels ~ 137B/frame, so 500Hz is ~68kB/s
+     * (69% of a 1Mbaud link) - that already overflows the DAPLink VCP, use
+     * 250Hz. HAL_GetTick only resolves 1ms, so 1000Hz is out of reach. */
     if (rate_hz < 1u)                { rate_hz = 1u; }
     if (rate_hz > DBG_WAVE_RATE_MAX) { rate_hz = DBG_WAVE_RATE_MAX; }
     s_st.wave_rate_hz = rate_hz;
