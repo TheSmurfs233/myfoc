@@ -7,10 +7,24 @@
 
 ## 1. 一分钟上手
 
+**必须用 Vitis_HLS 自带的 msys2 bash 运行**（脚本里的 `/d/...` 路径和
+`GCC_BIN` 只在这套环境里成立）：
+
+```powershell
+# PowerShell 里一条命令跑完（推荐）
+& "D:\Xilinx\Vitis_HLS\2022.2\tps\win64\msys64\usr\bin\bash.exe" -lc `
+  "cd /d/Embedded/STM32/dsh_foc && bash test/host/build.sh"
+```
+
 ```bash
-cd D:/Embedded/STM32/dsh_foc
+# 已经在 msys2 / git-bash 里时，直接：
+cd /d/Embedded/STM32/dsh_foc
 bash test/host/build.sh
 ```
+
+> ⚠️ **不要用 WSL 的 `bash`**。WSL 下 `command -v gcc` 会落到 `/usr/bin/gcc`，
+> `GCC_BIN` 那行 PATH 前缀失效，报的是 `undefined reference to 'cosf'`（缺 `-lm`），
+> 而**真正的错误会被掩盖**。判断方法：脚本开头的环境打印里看 `gcc` 路径。
 
 输出示例：
 
@@ -20,7 +34,7 @@ bash test/host/build.sh
   ringbuf: basic push/pop                   ok
   ...
 ============================
-checks: 432   failed: 0
+checks: 538   failed: 0
 RESULT: PASS
 ```
 
@@ -77,7 +91,7 @@ test/host/
 
 ---
 
-## 4. 覆盖范围（S1~S3，278 条断言）
+## 4. 覆盖范围（S1~S10，538 条断言）
 
 | 模块 | 测了什么 |
 |---|---|
@@ -147,7 +161,7 @@ static void test_clarke(void)
 
 | 脚本 | 覆盖 | 断言数 |
 |---|---|---|
-| `s1_accept.py` | help(23 行)/ver/stat(13 行)、FireWater 禁冒号、按键/LED、状态机、`rate`、7 通道波形、丢帧 | 64 |
+| `s1_accept.py` | help(45 行)/ver/stat、FireWater 禁冒号、按键/LED、状态机、`rate`、**21 通道**波形、丢帧 | 64 |
 | `s2_accept.py` | PWM 命令、占空比钳位、启停、封波、行数回归 | 25 |
 | `s3_accept.py` | 校准生命周期（erase→start→live→gen）、帧率、`pwm` 保护、DWT 时序画像 | 16 |
 

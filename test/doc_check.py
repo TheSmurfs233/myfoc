@@ -41,6 +41,11 @@ except Exception:
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 DOCS = sorted(glob.glob(os.path.join(ROOT, 'docs', '*.md')))
+# workflow/ is the reusable process spec: same formatting rules, but it is NOT a
+# project document (no version numbers / TBD policy), so only the generic
+# checks (mojibake, table structure) apply to it.
+PROCDOCS = sorted(glob.glob(os.path.join(ROOT, 'workflow', '**', '*.md'),
+                            recursive=True))
 SRC = sorted(glob.glob(os.path.join(ROOT, 'User', '**', '*.c'), recursive=True) +
              glob.glob(os.path.join(ROOT, 'User', '**', '*.h'), recursive=True))
 ACCEPT = os.path.join(ROOT, 'test', 'accept', 's1_accept.py')
@@ -85,7 +90,7 @@ def rel(path):
 
 
 # ---------------------------------------------------------------- 1. mojibake
-for p in DOCS + [os.path.join(ROOT, 'test', 'README.md')]:
+for p in DOCS + PROCDOCS + [os.path.join(ROOT, 'test', 'README.md')]:
     if not os.path.exists(p):
         continue
     for n, line in enumerate(read(p).splitlines(), 1):
@@ -99,7 +104,7 @@ for p in SRC:
         err('%s contains non-ASCII bytes' % rel(p))
 
 # ---------------------------------------------------------- 3. broken tables
-for p in DOCS:
+for p in DOCS + PROCDOCS:
     in_fence = False
     for n, line in enumerate(read(p).splitlines(), 1):
         t = line.strip()
@@ -121,7 +126,7 @@ def table_cells(line):
     return len(parts) - 2
 
 
-for p in DOCS:
+for p in DOCS + PROCDOCS:
     in_fence = False
     header = None
     for n, line in enumerate(read(p).splitlines(), 1):
@@ -223,7 +228,8 @@ for p in DOCS:
                 break
 
 # ----------------------------------------------------------------- report
-print('doc_check: %d documents, %d source files' % (len(DOCS), len(SRC)))
+print('doc_check: %d documents, %d source files, %d workflow docs'
+      % (len(DOCS), len(SRC), len(PROCDOCS)))
 if help_count is not None:
     print('doc_check: help lines %d, wave channels %s, build id %s'
           % (help_count, wave_ch, build_id))

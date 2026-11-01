@@ -20,6 +20,12 @@ if ! command -v gcc >/dev/null 2>&1; then
     exit 1
 fi
 
+# Print the environment so "running in the wrong shell" shows up immediately.
+# Symptoms of a wrong shell: missing -lm (cosf/sqrtf) instead of the real error.
+echo "env  : bash $BASH_VERSION"
+echo "env  : gcc  $(command -v gcc)"
+echo "env  : root $ROOT"
+
 INC="-I$HERE/fake -I$ROOT/User/Cfg -I$ROOT/User/Bsp -I$ROOT/User/Mid -I$ROOT/User/Alg -I$ROOT/User/App"
 SRC="$HERE/test_main.c
      $HERE/fake/hal_stub.c
@@ -34,9 +40,9 @@ SRC="$HERE/test_main.c
      $ROOT/User/Alg/alg_pi.c
      $ROOT/User/Alg/alg_foc.c
      $ROOT/User/Alg/alg_spd.c
-     $ROOT\/User/Alg/alg_pll.c
-  $ROOT/User/Alg/alg_obs.c
-  $ROOT/User/Alg/alg_if.c
+     $ROOT/User/Alg/alg_pll.c
+     $ROOT/User/Alg/alg_obs.c
+     $ROOT/User/Alg/alg_if.c
      $ROOT/User/Bsp/bsp_gpio.c
      $ROOT/User/Bsp/bsp_pwm.c
      $ROOT/User/Bsp/bsp_adc.c
