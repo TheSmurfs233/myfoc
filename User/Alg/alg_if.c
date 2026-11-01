@@ -1,7 +1,8 @@
 /**
   ******************************************************************************
   * @file    alg_if.c
-  * @brief   Open-loop I/f ramp (S10.4).
+  * @brief   Open-loop I/f ramp (S10.4), with soft amplitude ramp and d -> q
+  *          crossfade (S10.8, #166).
   *
   * Layer: Alg. No hardware access, no floating point library beyond constants.
   ******************************************************************************
@@ -9,7 +10,8 @@
 
 #include "alg_if.h"
 
-#define IF_TWO_PI   6.283185307179586f
+#define IF_TWO_PI       6.283185307179586f
+#define IF_RAMP_DEF_S   0.1f        /* default amplitude ramp: 100 ms */
 
 void alg_if_init(alg_if_t *v, float acc_hz_s, float i_amp, float f_min_hz)
 {
@@ -25,9 +27,12 @@ void alg_if_init(alg_if_t *v, float acc_hz_s, float i_amp, float f_min_hz)
     v->f_hz     = v->f_min_hz;
     v->f_target = v->f_min_hz;
     v->i_now    = 0.0f;
+    v->xq       = 1.0f;
     v->t_align  = 0.0f;
     v->phase    = 0u;
     v->align_s  = 0.0f;
+    v->ramp_s   = IF_RAMP_DEF_S;
+    v->xfade_s  = 0.0f;         /* instant: keeps the original behaviour */
     v->run      = 0u;
 }
 
@@ -37,6 +42,22 @@ void alg_if_set_align_time(alg_if_t *v, float seconds)
         return;
     }
     v->align_s = (seconds > 0.0f) ? seconds : 0.0f;
+}
+
+void alg_if_set_ramp_time(alg_if_t *v, float seconds)
+{
+    if (v == 0) {
+        return;
+    }
+    v->ramp_s = (seconds > 0.0f) ? seconds : IF_RAMP_DEF_S;
+}
+
+void alg_if_set_xfade(alg_if_t *v, float seconds)
+{
+    if (v == 0) {
+        return;
+    }
+    v->xfade_s = (seconds > 0.0f) ? seconds : 0.0f;
 }
 
 void alg_if_start(alg_if_t *v)
@@ -49,6 +70,7 @@ void alg_if_start(alg_if_t *v)
     v->f_hz     = v->f_min_hz;
     v->f_target = v->f_min_hz;
     v->i_now    = 0.0f;         /* the caller sees a soft start by design */
+    v->xq       = 0.0f;         /* then crossfades d -> q in the drag phase */
     v->t_align  = 0.0f;
     v->phase    = (v->align_s > 0.0f) ? 0u : 1u;
     v->run      = 1u;
@@ -75,9 +97,44 @@ void alg_if_stop(alg_if_t *v)
 
     v->run     = 0u;
     v->i_now   = 0.0f;
+    v->xq      = 0.0f;
     v->f_hz    = v->f_min_hz;
     v->phase   = 0u;
     v->t_align = 0.0f;
+}
+
+/* Amplitude ramp: reach i_amp in ramp_s seconds (both directions). */
+static void if_ramp_amp(alg_if_t *v, float ts)
+{
+    float step = v->i_amp * ts / v->ramp_s;
+
+    if (v->i_now < v->i_amp) {
+        v->i_now += step;
+        if (v->i_now > v->i_amp) { v->i_now = v->i_amp; }
+    } else if (v->i_now > v->i_amp) {
+        v->i_now -= step;
+        if (v->i_now < v->i_amp) { v->i_now = v->i_amp; }
+    }
+}
+
+/* d -> q crossfade. A hard 90 deg hop put the whole 0.6 A on the q axis in one
+ * 50 us frame = 17 mN.m step = ~1800 rpm/s on this rotor; that is the "kick"
+ * seen at start-up (measured 2026-11-01, #166). */
+static void if_ramp_xfade(alg_if_t *v, float ts)
+{
+    if (v->xq >= 1.0f) {
+        return;
+    }
+
+    if (v->xfade_s <= 0.0f) {
+        v->xq = 1.0f;
+        return;
+    }
+
+    v->xq += ts / v->xfade_s;
+    if (v->xq > 1.0f) {
+        v->xq = 1.0f;
+    }
 }
 
 void alg_if_step(alg_if_t *v, float ts)
@@ -92,16 +149,16 @@ void alg_if_step(alg_if_t *v, float ts)
     if (v->phase == 0u) {
         v->t_align += ts;
 
-        /* amplitude ramps up (same slew), angle stays at 0 */
-        if (v->i_now < v->i_amp) {
-            v->i_now += v->i_amp * ts * 10.0f;
-            if (v->i_now > v->i_amp) { v->i_now = v->i_amp; }
-        }
+        /* amplitude ramps up, angle stays at 0, whole vector still on d */
+        if_ramp_amp(v, ts);
+        v->xq = 0.0f;
 
         if (v->t_align >= v->align_s) {
             v->phase = 1u;
             v->t_align = 0.0f;
             v->f_hz = v->f_min_hz;
+            /* the crossfade starts here, not at its end */
+            v->xq = 0.0f;
         }
         return;
     }
@@ -120,23 +177,36 @@ void alg_if_step(alg_if_t *v, float ts)
         }
     }
 
-    /* ---- amplitude ramp: 20 ms worth per 100 ms, i.e. i_amp per 0.1 s ----
-     * Kept here so a caller that applies i_now directly still gets a soft
-     * start, which is what stops the 180 deg ambiguity from stalling it. */
-    if (v->i_now < v->i_amp) {
-        v->i_now += v->i_amp * ts * 10.0f;      /* 0 -> i_amp in 100 ms */
-        if (v->i_now > v->i_amp) {
-            v->i_now = v->i_amp;
-        }
-    } else if (v->i_now > v->i_amp) {
-        v->i_now -= v->i_amp * ts * 10.0f;
-        if (v->i_now < v->i_amp) {
-            v->i_now = v->i_amp;
-        }
-    }
+    /* ---- amplitude ramp (kept here so a caller that applies i_now directly
+     * still gets a soft start, which is what stops the 180 deg ambiguity from
+     * stalling it) ---- */
+    if_ramp_amp(v, ts);
+
+    /* ---- d -> q crossfade ---- */
+    if_ramp_xfade(v, ts);
 
     /* ---- angle ---- */
     v->theta += IF_TWO_PI * v->f_hz * ts;
     while (v->theta >= IF_TWO_PI) { v->theta -= IF_TWO_PI; }
     while (v->theta <  0.0f)     { v->theta += IF_TWO_PI; }
+}
+
+void alg_if_apply(const alg_if_t *v, float *id, float *iq)
+{
+    float x;
+    float i;
+
+    if (v == 0) {
+        if (id != 0) { *id = 0.0f; }
+        if (iq != 0) { *iq = 0.0f; }
+        return;
+    }
+
+    x = v->xq;
+    if (x < 0.0f) { x = 0.0f; }
+    if (x > 1.0f) { x = 1.0f; }
+    i = v->i_now;
+
+    if (id != 0) { *id = i * (1.0f - x); }
+    if (iq != 0) { *iq = i * x; }
 }

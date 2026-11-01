@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID             165u
+#define FW_BUILD_ID             166u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -321,7 +321,15 @@ extern "C" {
 /* d-axis pre-align before the drag: pulls the rotor to a known angle so
  * the 180 deg ambiguity becomes a deterministic start (measured: without
  * it the drag worked or failed purely on the starting position). */
-#define IF_ALIGN_MS            400u
+#define IF_ALIGN_MS            600u
+
+/* S10.8: soft start. The pre-align used to reach 0.6 A in 100 ms and then hop
+ * the whole vector onto the q axis in one 50 us frame (0 -> 17 mN.m, about
+ * 1800 rpm/s on this rotor): that is the first visible "kick" with the motor
+ * standing loose on the bench. Now the amplitude takes IF_I_RAMP_MS and the
+ * vector rotates d -> q over IF_XFADE_MS. */
+#define IF_I_RAMP_MS           300u     /* 0 -> i_amp ramp time        */
+#define IF_XFADE_MS            80u      /* d -> q crossfade time       */
 
 /* ==========================================================================
  * S10.5: hand-over from the I/f frame to the observer

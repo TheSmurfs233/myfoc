@@ -60,7 +60,7 @@ OUT="$HERE/run_tests.exe"
 
 echo "compiling..."
 # shellcheck disable=SC2086
-gcc -std=gnu99 -O1 -Wall -Wextra -Wno-unused-parameter $INC $SRC -o "$OUT" || exit 1
+gcc -std=gnu99 -O1 -Wall -Wextra -Wno-unused-parameter $INC $SRC -o "$OUT" -lm || exit 1
 
 echo "running..."
 "$OUT"

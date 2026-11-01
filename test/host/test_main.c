@@ -2479,6 +2479,91 @@ static void test_cmd(void)
     }
     section_end();
 
+    section("alg_if: soft start (slow amplitude ramp + d -> q crossfade)");
+    {
+        alg_if_t v;
+        float ts = 1.0f / 20000.0f;
+        float id;
+        float iq;
+        int i;
+
+        /* S10.8 / #166: the App's settings. Before this the amplitude reached
+         * 0.6 A in 100 ms and then hopped 90 deg onto q in one 50 us frame,
+         * which is 0 -> 17 mN.m instantly = the visible kick. */
+        alg_if_init(&v, 30.0f, 0.6f, 2.0f);
+        alg_if_set_ramp_time(&v, 0.30f);
+        alg_if_set_xfade(&v, 0.08f);
+        alg_if_set_align_time(&v, 0.60f);
+        alg_if_start(&v);
+        T(v.phase == 0u);
+
+        /* Half way into the amplitude ramp the current is still moderate. */
+        for (i = 0; i < 3000; i++) { alg_if_step(&v, ts); }     /* 150 ms */
+        T(v.i_now > 0.22f);
+        T(v.i_now < 0.38f);
+        alg_if_apply(&v, &id, &iq);
+        T(fabsf(iq) < 1e-6f);                    /* still purely on d */
+        T(fabsf(id - v.i_now) < 1e-6f);
+
+        /* End of the pre-align: full amplitude, crossfade under way. */
+        for (i = 0; i < 10000; i++) { alg_if_step(&v, ts); }    /* 650 ms */
+        T(v.phase == 1u);
+        T(fabsf(v.i_now - 0.6f) < 0.01f);
+        T(v.xq > 0.0f);
+        T(v.xq < 1.0f);
+        alg_if_apply(&v, &id, &iq);
+        T(iq > 0.0f);
+        T(iq < v.i_now);           /* torque ramps: no step */
+        T(fabsf((id + iq) - v.i_now) < 1e-6f);
+
+        /* Crossfade finished: everything on q. */
+        for (i = 0; i < 2000; i++) { alg_if_step(&v, ts); }     /* +100 ms */
+        alg_if_apply(&v, &id, &iq);
+        T(fabsf(v.xq - 1.0f) < 1e-6f);
+        T(fabsf(iq - v.i_now) < 1e-6f);
+        T(fabsf(id) < 1e-6f);
+
+        /* The old behaviour (xfade off) must still snap to q immediately, so
+         * the change is opt-in for callers that want it. */
+        alg_if_init(&v, 30.0f, 0.6f, 2.0f);
+        alg_if_start(&v);
+        for (i = 0; i < 200; i++) { alg_if_step(&v, ts); }
+        T(fabsf(v.xq - 1.0f) < 1e-6f);
+    }
+    section_end();
+
+    section("spd: preload makes the hand-over transfer bumpless");
+    {
+        alg_spd_t sp;
+        float u;
+        int i;
+        uint8_t ok = 1u;
+
+        alg_spd_init(&sp, 0.05f, 0.5f, 1.2f, 0.015f, 8e-5f, 0.15f, 50.0f);
+        sp.on = 1u;
+
+        /* Hand-over: rotor already at the drag speed, the drag was making
+         * 0.17 A of torque current. */
+        sp.spd_ref = 310.0f;
+        alg_spd_preload(&sp, 0.17f);
+
+        for (i = 0; i < 20; i++) {
+            u = alg_spd_step(&sp, 310.0f, 0.001f);
+            if ((u < 0.16f) || (u > 0.18f)) { ok = 0u; }
+        }
+        T(ok == 1u);               /* stays at the drag torque, no jump */
+
+        /* Without the preload the same situation brakes hard: reference just
+         * left zero (the App's 600 rpm/s ramp), rotor already at 310 rpm. */
+        alg_spd_reset(&sp);
+        sp.on      = 1u;
+        sp.spd_ref = 10.0f;
+        sp.spd_f   = 310.0f;
+        u = alg_spd_step(&sp, 310.0f, 0.001f);
+        T(u < -1.0f);              /* that is the kick the preload removes */
+    }
+    section_end();
+
     section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the

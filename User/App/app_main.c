@@ -62,6 +62,7 @@ static float     s_ho_w;       /* blend weight 0..1 */
 static uint16_t  s_lost_ms;      /* loss-of-lock debounce (1 kHz ticks) */
 static float     s_if_rpm_tgt;  /* rpm requested by sfoc go */
 static float     s_ho_dth;     /* |theta_obs - theta_if|, rad */
+static float     s_ho_c0 = 1.0f; /* cos(s_ho_dth) at blend start (S10.8) */
 
 static alg_if_t      s_if;       /* S10.4 open-loop ramp */
 static alg_obs_t     s_obs;      /* S10.1 shadow observer */
@@ -253,6 +254,8 @@ void app_init(void)
     /* S10.4: open-loop I/f ramp (also configured on every start). */
     alg_if_init(&s_if, IF_ACC_HZ_S, IF_I_AMP_A, IF_F_MIN_HZ);
     alg_if_set_align_time(&s_if, IF_ALIGN_MS / 1000.0f);
+    alg_if_set_ramp_time(&s_if, IF_I_RAMP_MS / 1000.0f);   /* S10.8 soft start */
+    alg_if_set_xfade(&s_if, IF_XFADE_MS / 1000.0f);
 
     /* S10.2: calibration measured on hardware, see board_cfg.h. */
     s_obs.comp      = OBS_COMP_MODE;
@@ -1454,6 +1457,14 @@ static void task_foc(uint32_t t_pick)
                     if (s_ho_cnt >= (uint16_t)HO_HOLD_CNT) {
                         s_ho_state = 2u;
                         s_ho_w     = 0.0f;
+                        /* Torque factor of the drag: the forced q axis sits
+                         * s_ho_dth away from the real q axis, so the drag only
+                         * converts cos(dth) of its current into torque. */
+                        s_ho_c0    = cosf(s_ho_dth);
+                        /* A load angle beyond 90 deg would flip the torque
+                         * sign for the whole blend; keep it positive. */
+                        if (s_ho_c0 < 0.05f) { s_ho_c0 = 0.05f; }
+                        if (s_ho_c0 > 1.00f) { s_ho_c0 = 1.00f; }
                     }
                 } else {
                     s_ho_cnt = 0u;
@@ -1463,6 +1474,8 @@ static void task_foc(uint32_t t_pick)
             s_ho_w += FOC_TS / HO_BLEND_S;
             if (s_ho_w >= 1.0f) {
                 float rpm_tgt;
+                float rpm_now;
+                float iq0;
 
                 s_ho_w     = 1.0f;
                 s_ho_state = 3u;
@@ -1470,14 +1483,30 @@ static void task_foc(uint32_t t_pick)
                 /* S10.5b: from here the observer owns both angle and speed.
                  * Start the speed loop at the frequency the drag was running,
                  * then drop the forced ramp so nothing fights it. */
-                rpm_tgt = (s_if_rpm_tgt != 0.0f)
-                        ? s_if_rpm_tgt
-                        : (s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS));
+                rpm_now = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
+                rpm_tgt = (s_if_rpm_tgt != 0.0f) ? s_if_rpm_tgt : rpm_now;
                 if (rpm_tgt >  SPD_RPM_MAX) { rpm_tgt =  SPD_RPM_MAX; }
                 if (rpm_tgt < -SPD_RPM_MAX) { rpm_tgt = -SPD_RPM_MAX; }
+
+                /* Torque the drag was delivering. Captured BEFORE alg_if_stop,
+                 * which zeroes i_now and f_hz. */
+                iq0 = s_if.i_now * s_ho_c0;
+                if (iq0 < 0.0f) { iq0 = 0.0f; }
+
                 s_sfoc  = 1u;
                 alg_if_stop(&s_if);
-                app_spd_set(rpm_tgt);
+                (void)app_spd_set(rpm_tgt);
+
+                /* S10.8 bumpless transfer: the rotor is ALREADY at rpm_now.
+                 * spd_ref was zero (app_spd_off cleared it), so the ramp
+                 * started from 0 and the PI saw a -rpm_now error: measured
+                 * -1.2 A (clamped) for ~0.5 s right at the hand-over = the
+                 * second visible kick. Seed the reference, the integrator (to
+                 * the torque the drag was making) and the reference history
+                 * (without it the acceleration feedforward sees a
+                 * (rpm_now - 0)/ts step: ~32000 rad/s^2 * 3.11e-3 A = ~100 A). */
+                s_spd.spd_ref = rpm_now;
+                alg_spd_preload(&s_spd, iq0);
             }
         }
         /* Torque, not alignment: the current must sit on the q axis of the
@@ -1487,17 +1516,33 @@ static void task_foc(uint32_t t_pick)
          * ramped to 35 Hz, current 0.40 A, encoder 0 rpm. */
         if (s_if.phase == 0u) {
             /* Pre-align: d-axis, torque free (this is what "align ol" does). */
-            s_foc_info.id_ref = s_if.i_now;
-            s_foc_info.iq_ref = 0.0f;
             id_ref = s_if.i_now;
             iq_ref = 0.0f;
         } else {
-            /* Drag: q axis, torque. */
-            s_foc_info.id_ref = 0.0f;
-            s_foc_info.iq_ref = s_if.i_now;
-            id_ref = 0.0f;
-            iq_ref = s_if.i_now;
+            /* Drag: the vector crossfades d -> q over IF_XFADE_MS so the
+             * torque ramps up instead of hopping 90 deg in one frame. */
+            alg_if_apply(&s_if, &id_ref, &iq_ref);
         }
+
+        /* S10.8: while the frame rotates toward the observer the current
+         * vector is dth*(1-w) away from the real q axis, so the same current
+         * makes MORE torque (cos goes from 0.28 to 1.0 over the blend). Scale
+         * by cos(dth)/cos(dth*(1-w)) to keep the torque flat; at w = 1 it
+         * lands exactly on i_now*cos(dth), the value the speed loop is
+         * preloaded with, so torque is continuous across the hand-over. */
+        if ((s_ho_state == 2u) && (s_if.phase == 1u)) {
+            float rem = s_ho_dth * (1.0f - s_ho_w);
+            float cw  = cosf(rem);
+
+            if (cw > 0.20f) {
+                float sc = s_ho_c0 / cw;
+
+                id_ref *= sc;
+                iq_ref *= sc;
+            }
+        }
+        s_foc_info.id_ref = id_ref;
+        s_foc_info.iq_ref = iq_ref;
         s_foc_info.spd_rpm = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
     }
 

@@ -208,3 +208,24 @@ float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts)
     s->out = u;
     return u;
 }
+
+void alg_spd_preload(alg_spd_t *s, float out_a)
+{
+    float ff;
+
+    if (s == 0) {
+        return;
+    }
+
+    ff = s->ff_base + (s->ff_slope * ((s->spd_ref > 0.0f) ? s->spd_ref : -s->spd_ref));
+
+    /* The step function adds +-ff on top of the PI output, so only the rest
+     * has to come from the integrator. The error is zero at the moment of the
+     * transfer (reference and feedback both start at the current speed), hence
+     * out = integ + ff. */
+    s->pi.integ = out_a - ((s->spd_ref > 0.0f) ? ff : -ff);
+    s->ref_prev = s->spd_ref;
+    s->spd_f    = s->spd_ref;
+    s->kick_on  = 0u;
+    s->out      = out_a;
+}

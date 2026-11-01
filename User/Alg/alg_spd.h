@@ -64,6 +64,15 @@ void  alg_spd_reset(alg_spd_t *s);
  * Returns the iq reference (already limited). */
 float alg_spd_step(alg_spd_t *s, float spd_rpm, float ts);
 
+/* Bumpless transfer: make the next alg_spd_step() output out_a instead of
+ * jumping. Seeds the PI integrator, the feedback filter and the reference
+ * history (so the acceleration feedforward does not see a step) and disables
+ * the start-up kick. Used at the I/f -> observer hand-over, where the rotor is
+ * already spinning: with spd_ref = 0 the loop braked at -1.2 A for ~0.5 s
+ * (measured 2026-11-01, the second "kick" at sfoc go). Call it AFTER setting
+ * spd_ref. */
+void  alg_spd_preload(alg_spd_t *s, float out_a);
+
 #ifdef __cplusplus
 }
 #endif
