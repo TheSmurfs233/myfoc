@@ -119,7 +119,6 @@ extern "C" {
 #define CUR_RANGE_A             ((ADC_VREF * 0.5f) / (INA240_GAIN * RSHUNT_OHM))
 
 /* Software over-current trip (used from S7 on) */
-#define CUR_TRIP_A              1.2f
 
 /* Zero-drift calibration: average this many injected frames at 20kHz (12.8ms).
  * Runs at "start" with the duty forced to the 50% zero vector, because the

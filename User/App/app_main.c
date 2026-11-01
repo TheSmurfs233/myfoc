@@ -1414,9 +1414,9 @@ static void task_foc(uint32_t t_pick)
                 if ((e_mag > OBS_E_MIN_V) &&
                     (fabsf(rpm_if) > HO_MIN_RPM) &&
                     ((eq_ex2 < 0.05f) || (e_mag > (0.50f * eq_ex2)))) {
-                if (s_ho_cnt < 0xFFFFu) {
-                    s_ho_cnt++;
-                }
+                    if (s_ho_cnt < 0xFFFFu) {
+                        s_ho_cnt++;
+                    }
                     if (s_ho_cnt >= (uint16_t)HO_HOLD_CNT) {
                         s_ho_state = 2u;
                         s_ho_w     = 0.0f;
