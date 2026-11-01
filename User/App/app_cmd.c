@@ -966,6 +966,15 @@ static float   s_pll_zeta = PLL_ZETA;
         if ((n >= 2u) && (strcmp(tok[1], "off") == 0)) {
             app_if_stop();
             app_ho_reset();        /* idle, not watching */
+            /* With an encoder fitted this is a switch to encoder closed loop:
+             * the speed loop keeps running at the same target, which is what
+             * "back to sensor mode" means. Without an encoder there is
+             * nothing to hand back to, so releasing means releasing: leaving
+             * the loop armed kept a stale 1500 rpm target and let it push a
+             * saturated iq_ref into the telemetry (#169). */
+            if (mid_enc_enabled() == 0u) {
+                app_spd_off();
+            }
             log_printf("OK sfoc off (%s)", (mid_enc_enabled() != 0u)
                        ? "encoder mode"
                        : "released, no encoder: use 'sfoc go'");

@@ -2402,6 +2402,12 @@ static void task_wave(uint32_t now)
         } else if (s_if.run != 0u) {
             th_deg = s_if.theta * 57.29577951308232f;
             hz_use = s_if.f_hz;
+        } else if (s_coast != 0u) {
+            /* #168 coast: the observer still tracks the spinning rotor with
+             * the bridge in zero-current mode, so show it here instead of a
+             * dead 0 Hz. */
+            th_deg = s_obs.theta_out * 57.29577951308232f;
+            hz_use = s_obs.omega_e / 6.283185307179586f;
         }
 
         ch[8] = th_deg;
