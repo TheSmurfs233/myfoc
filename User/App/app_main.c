@@ -760,8 +760,23 @@ uint8_t app_stop(void)
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
     foc_info_clear_meas();               /* #167: no stale display */
-    s_coast            = 0u;             /* #168: nothing to coast */
-    s_coast_ticks      = 0u;
+    /* #172: a stop or a fault must also give up the angle source. They used
+     * to survive, so the next "start" resumed sensorless on a stale observer
+     * angle: measured iq_ref 0 while the current loop pinned vq at the rail
+     * and drew 0.9 A with the shaft still - the motor looked dead until
+     * another stop/start pair. */
+    s_sfoc         = 0u;
+    s_ho_state     = 0u;
+    s_ho_w         = 0.0f;
+    s_ho_cnt       = 0u;
+    s_ho_c0        = 1.0f;
+    s_lost_ms      = 0u;
+    s_rail_ms      = 0u;
+    s_if_rpm_tgt   = 0.0f;
+    s_coast        = 0u;
+    s_coast_ticks  = 0u;
+    alg_if_stop(&s_if);
+    alg_obs_reset(&s_obs, 0.0f);
     s_foc_info.ready   = 0u;
     s_foc_trip_cnt     = 0u;
     s_vf_info.on       = 0u;
@@ -841,11 +856,26 @@ void app_fault_raise(uint8_t code, float value)
     bsp_pwm_set_all_duty(PWM_START_DUTY);
 
     app_spd_off();
+    /* #172: a stop or a fault must also give up the angle source. They used
+     * to survive, so the next "start" resumed sensorless on a stale observer
+     * angle: measured iq_ref 0 while the current loop pinned vq at the rail
+     * and drew 0.9 A with the shaft still - the motor looked dead until
+     * another stop/start pair. */
+    s_sfoc         = 0u;
+    s_ho_state     = 0u;
+    s_ho_w         = 0.0f;
+    s_ho_cnt       = 0u;
+    s_ho_c0        = 1.0f;
+    s_lost_ms      = 0u;
+    s_rail_ms      = 0u;
+    s_if_rpm_tgt   = 0.0f;
+    s_coast        = 0u;
+    s_coast_ticks  = 0u;
+    alg_if_stop(&s_if);
+    alg_obs_reset(&s_obs, 0.0f);
     s_foc_info.id_ref  = 0.0f;
     s_foc_info.iq_ref  = 0.0f;
     foc_info_clear_meas();               /* #167: no stale display */
-    s_coast            = 0u;             /* #168: nothing to coast */
-    s_coast_ticks      = 0u;
     s_step_phase       = 0u;
     alg_foc_reset(&s_foc);
 
