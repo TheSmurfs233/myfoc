@@ -54,6 +54,8 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 /* ---- open-loop V/f (S4) ---- */
 static alg_vf_t      s_vf;
 static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
+
+static void app_sfoc_release(void);
 static uint8_t       s_coast;     /* #168: no angle source, rotor still
                                    * turning -> zero current, no short  */
 static uint32_t      s_coast_ticks;
@@ -62,7 +64,8 @@ static uint8_t   s_sfoc;      /* 1 = sensorless: angle and speed from the observ
 static uint8_t   s_ho_state;   /* 0 idle, 1 watching, 2 blending, 3 done */
 static uint16_t  s_ho_cnt;
 static float     s_ho_w;       /* blend weight 0..1 */
-static uint16_t  s_lost_ms;      /* loss-of-lock debounce (1 kHz ticks) */
+static uint16_t  s_lost_ms;      /* loss-of-lock debounce, 20 kHz frames */
+static uint16_t  s_rail_ms;      /* PLL rail dwell, 20 kHz frames        */
 static float     s_if_rpm_tgt;  /* rpm requested by sfoc go */
 static float     s_ho_dth;     /* |theta_obs - theta_if|, rad */
 static float     s_ho_ds;      /* signed theta_obs - theta_if, rad */
@@ -1418,7 +1421,7 @@ static void task_foc(uint32_t t_pick)
             if (s_lost_ms < 0xFFFFu) {
                 s_lost_ms++;
             }
-            if (s_lost_ms >= (uint16_t)HO_LOST_MS) {
+            if (s_lost_ms >= (uint16_t)(HO_LOST_MS * (FOC_FREQ_HZ / 1000u))) {
                 s_lost_ms = 0u;
                 app_sfoc_abort();
             }
@@ -1427,6 +1430,35 @@ static void task_foc(uint32_t t_pick)
         }
     } else {
         s_lost_ms = 0u;
+    }
+
+    /* ---- S10.13: PLL speed rail ----
+     * The observer PLL clamps at OBS_W_MAX_RADS. A clamped PLL is not an
+     * observer any more: the angle free-runs at the rail rate and the
+     * drive turns into an open-loop V/f push, so both the reported speed
+     * and any protection built on it are meaningless. Drop out instead. */
+    if ((s_sfoc != 0u) && (s_ho_state == 3u)) {
+        float w_rail = (s_obs.omega_e > 0.0f) ? s_obs.omega_e
+                                              : -s_obs.omega_e;
+
+        if (w_rail >= (OBS_RAIL_RATIO * OBS_W_MAX_RADS)) {
+            if (s_rail_ms < 0xFFFFu) {
+                s_rail_ms++;
+            }
+            if (s_rail_ms >= (uint16_t)(HO_RAIL_MS * (FOC_FREQ_HZ / 1000u))) {
+                float rpm_rail = s_obs.omega_e * 9.54929658551372f
+                               / (float)ENC_POLE_PAIRS;
+
+                s_rail_ms = 0u;
+                app_sfoc_release();
+                log_printf("ERR obs speed railed (%d rpm), drive released",
+                           (int)rpm_rail);
+            }
+        } else {
+            s_rail_ms = 0u;
+        }
+    } else {
+        s_rail_ms = 0u;
     }
 
     /* ---- S7.3 speed loop: 1 kHz, drives iq_ref (d stays at zero) ---- */
@@ -1443,7 +1475,14 @@ static void task_foc(uint32_t t_pick)
                    : e->spd_rpm;
 
             (void)alg_spd_step(&s_spd, spd_fb, SPD_TS_S);
+            /* S10.13: in reverse the observer frame hands torque the other
+             * way round (measured: +0.6 A on the forced frame drags the
+             * rotor to -300 rpm). Mirror the command so that "push harder"
+             * still means grow the speed the loop is being asked for. */
             s_foc_info.iq_ref = s_spd.out;
+            if ((s_sfoc != 0u) && (s_obs.omega_e < 0.0f)) {
+                s_foc_info.iq_ref = -s_foc_info.iq_ref;
+            }
             s_foc_info.id_ref = 0.0f;
             s_foc_info.spd_rpm = spd_fb;
         }
@@ -1841,15 +1880,28 @@ void app_if_set_acc(float hz_s)
 }
 
 /* ---- S10.5 hand-over ---- */
-/* Drop out of sensorless safely: release the current and report. */
-void app_sfoc_abort(void)
+/* Drop out of sensorless safely: release the current, keep the reason
+ * in the caller. */
+static void app_sfoc_release(void)
 {
     s_sfoc     = 0u;
     s_ho_state = 0u;
     app_spd_off();
     app_if_stop();
-    log_printf("ERR obs lost lock (eq %.2f V), drive released",
-               (double)s_obs.eq);
+}
+
+/* S10.13: the detector works on |e|, so the message quotes |e| as well -
+ * printing the projected eq made a healthy 90 deg offset look like zero
+ * back-EMF and cost an afternoon. */
+void app_sfoc_abort(void)
+{
+    float e_abs = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
+                        (s_obs.e_beta  * s_obs.e_beta));
+    float w_abs = (s_obs.omega_e > 0.0f) ? s_obs.omega_e : -s_obs.omega_e;
+
+    app_sfoc_release();
+    log_printf("ERR obs lost lock (|e| %.2f V, expect %.2f V), drive released",
+               (double)e_abs, (double)(w_abs * MOTOR_KE_V_RAD_S));
 }
 
 uint8_t app_sfoc_on(void)   { return s_sfoc; }
@@ -1857,6 +1909,7 @@ uint8_t app_sfoc_on(void)   { return s_sfoc; }
 uint8_t app_ho_state(void) { return s_ho_state; }
 float   app_ho_w(void)     { return s_ho_w; }
 float   app_ho_dth(void)   { return s_ho_dth; }
+float   app_ho_ds(void)    { return s_ho_ds; }
 void    app_ho_reset(void)
 {
     s_sfoc     = 0u;

@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID         170u
+#define FW_BUILD_ID         171u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -383,6 +383,13 @@ extern "C" {
 #define OBS_LPF_HZ              1500.0f  /* back-EMF low pass         */
 #define OBS_PLL_WN_HZ           80.0f    /* observer PLL bandwidth     */
 #define OBS_W_MAX_RADS          (2000.0f * 0.10472f * 7.0f)  /* 2000 rpm elec */
+
+/* S10.13: the PLL clamps at OBS_W_MAX_RADS. Once it does, the angle
+ * free-runs and the drive degenerates into a fixed-frequency V/f push
+ * whose reported speed is fiction (measured reverse: obs w pinned at
+ * exactly -2000 rpm while the rotor was elsewhere). Refuse to drive. */
+#define OBS_RAIL_RATIO          0.95f   /* of OBS_W_MAX_RADS           */
+#define HO_RAIL_MS              50u     /* dwell before releasing, ms  */
 /* S10.2 calibration, measured on hardware (#132, 500..1800 rpm):
  *   comp 2 (retard) with delay 0 and a -3.6 deg trim gives
  *   2.33 / 1.88 / 1.18 / 0.09 deg of angle error at

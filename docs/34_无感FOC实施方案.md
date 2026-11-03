@@ -548,4 +548,15 @@ id ≈ iq · sin(Δθ)
 | 起转方向 | 反向请求从 +2 Hz 起步，先正向抖 67 ms | `alg_if.c`：`alg_if_set_target()` 在起始窗口内把 `f_hz` 吸到有符号最小频率 |
 
 换向（跨越 0 rpm）仍建议 `sfoc 0` → `sfoc go -<rpm>`，不做在线跨零。
+### S10.13 反向闭环（#171）
 
+| 问题 | 处理 |
+|---|---|
+| PLL 撞限后自由旋转 | `OBS_RAIL_RATIO` + `HO_RAIL_MS` 判据，释放并报 `ERR obs speed railed` |
+| 反向转矩符号与正向相反 | 无感态 `omega_e < 0` 时速度环输出取反 |
+| 交接角差无符号 | 新增 `s_ho_ds`，`sfoc` 查询印有符号的 `ds` |
+| 失步去抖单位错（5 ms 当 100 ms） | 按帧数换算 `HO_LOST_MS * (FOC_FREQ_HZ/1000)` |
+| `ERR obs lost lock` 印投影 eq | 改为印反电动势幅值 `E` 与期望值 |
+
+实测（350 行日志，无编码器）：400 rpm 正向 `ds +94.15 deg`、-400 rpm 反向
+`ds -58.55 deg`、-900 rpm 稳定 -906、-900 → +400 直接换向成功。
