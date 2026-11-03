@@ -1453,7 +1453,16 @@ static void task_foc(uint32_t t_pick)
             }
             if (s_lost_ms >= (uint16_t)(HO_LOST_MS * (FOC_FREQ_HZ / 1000u))) {
                 s_lost_ms = 0u;
-                app_sfoc_abort();
+                if (s_spd.on != 0u) {
+                    app_sfoc_abort();
+                } else {
+                    /* S10.15: after "sfoc go 0" the loop is off and the
+                     * rotor is only coasting. Losing the back-EMF here
+                     * means it came to rest, which is what was asked for -
+                     * release quietly instead of crying "lost lock". */
+                    app_sfoc_release();
+                    log_printf("OK rotor stopped, sensorless released");
+                }
             }
         } else {
             s_lost_ms = 0u;

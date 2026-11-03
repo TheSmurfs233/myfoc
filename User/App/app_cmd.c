@@ -1040,11 +1040,18 @@ static float   s_pll_zeta = PLL_ZETA;
                  * is dragging use its commanded speed, otherwise the
                  * observer's own (there is nothing better to compare with). */
                 float rpm_d = (double)app_if_freq_hz() * (60.0 / 7.0);
-                float w_a3  = (app_if_on() != 0u)
+                /* S10.15: only trust the drag speed while the drag is
+                 * actually running. During the pre-align the commanded
+                 * frequency is the 2 Hz floor, i.e. it says nothing about
+                 * the back-EMF the rotor should have - that printed a
+                 * meaningless 12.45. */
+                uint8_t dragging = ((app_if_on() != 0u) &&
+                                    (app_if_phase() == 1u)) ? 1u : 0u;
+                float w_a3  = (dragging != 0u)
                             ? (rpm_d * 0.104719755120f * 7.0f)
                             : ((o->omega_e > 0.0f) ? o->omega_e : -o->omega_e);
                 float ex_a3 = w_a3 * MOTOR_KE_V_RAD_S;
-                float r3    = (ex_a3 > 0.05f) ? (eq_a3 / ex_a3) : 0.0f;
+                float r3    = (ex_a3 > 0.10f) ? (eq_a3 / ex_a3) : 0.0f;
 
                 log_printf(" diag: if run %u phase %u f %.1f Hz, ho cnt %u, |e|/exp %.2f",
                            (unsigned)app_if_on(), (unsigned)app_if_phase(),
