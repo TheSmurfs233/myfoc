@@ -2596,6 +2596,61 @@ static void test_cmd(void)
     }
     section_end();
 
+    section("foc: the PI keeps head-room for the feed-forward");
+    {
+        alg_foc_t f;
+        float duty[3];
+        float mag;
+        uint16_t k;
+
+        alg_foc_init(&f, 12.0f, 0.95f, 3.0f, 11000.0f, 5.7f);
+        alg_foc_set_ff(&f, 0.00413f, 0.0005f, 1.0f);
+
+        /* 709 rad/s electrical backwards: the ff is about -2.93 V. #169 kept
+         * the PI clamped at +-5.7 V and added the ff afterwards, so the most
+         * the loop could ever apply was 2.77 V - the machine free-ran. */
+        (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, -709.0f,
+                           0.0f, 1.16f, 0.00005f, duty);
+        T(f.pi_q.out_max > 8.0f);            /* 5.7 + 2.93 */
+        T(f.pi_q.out_max < 9.0f);
+        T(f.pi_q.out_min < -8.0f);
+        T(f.pi_d.out_max < 6.0f);            /* id does not couple at iq = 0 */
+
+        /* the vector circle is still the hard limit */
+        for (k = 0u; k < 20000u; k++) {
+            (void)alg_foc_step(&f, 0.0f, 0.0f, 0.0f, 0.0f, -709.0f,
+                               0.0f, 1.16f, 0.00005f, duty);
+        }
+        mag = sqrtf((f.vd * f.vd) + (f.vq * f.vq));
+        T(mag <= 5.71f);
+        T(mag > 5.0f);                       /* it really did saturate now */
+    }
+    section_end();
+
+    section("alg_if: a reverse request starts in reverse");
+    {
+        alg_if_t v;
+
+        alg_if_init(&v, 30.0f, 0.6f, 2.0f);
+        alg_if_set_align_time(&v, 0.0f);
+        alg_if_start(&v);
+        T(v.f_hz > 1.9f);
+        alg_if_set_target(&v, -46.7f);       /* 400 rpm backwards */
+        T(v.f_hz < -1.9f);                   /* #169: it stayed +2 Hz */
+        T(v.f_target < -46.0f);
+
+        /* once it is ramping, a new target must not snap anything */
+        alg_if_step(&v, 0.05f);
+        alg_if_step(&v, 0.05f);
+        {
+            float before = v.f_hz;
+
+            alg_if_set_target(&v, -20.0f);
+            T(v.f_hz == before);
+        }
+    }
+    section_end();
+
     section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the

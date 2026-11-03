@@ -65,6 +65,7 @@ static float     s_ho_w;       /* blend weight 0..1 */
 static uint16_t  s_lost_ms;      /* loss-of-lock debounce (1 kHz ticks) */
 static float     s_if_rpm_tgt;  /* rpm requested by sfoc go */
 static float     s_ho_dth;     /* |theta_obs - theta_if|, rad */
+static float     s_ho_ds;      /* signed theta_obs - theta_if, rad */
 static float     s_ho_c0 = 1.0f; /* cos(s_ho_dth) at blend start (S10.8) */
 
 static alg_if_t      s_if;       /* S10.4 open-loop ramp */
@@ -1480,7 +1481,8 @@ static void task_foc(uint32_t t_pick)
 
             while (de >  3.14159265f) { de -= 6.283185307179586f; }
             while (de < -3.14159265f) { de += 6.283185307179586f; }
-            s_ho_dth = (de > 0.0f) ? de : -de;     /* diagnostics only */
+            s_ho_ds  = de;                         /* signed: reverse < 0  */
+            s_ho_dth = (de > 0.0f) ? de : -de;     /* magnitude, diagnostics */
 
             /* Judge the observer, not its agreement with the forced frame:
              * the drag always runs at a load angle (measured ~74 deg), so the
@@ -1519,11 +1521,17 @@ static void task_foc(uint32_t t_pick)
                         /* Torque factor of the drag: the forced q axis sits
                          * s_ho_dth away from the real q axis, so the drag only
                          * converts cos(dth) of its current into torque. */
-                        s_ho_c0    = cosf(s_ho_dth);
-                        /* A load angle beyond 90 deg would flip the torque
-                         * sign for the whole blend; keep it positive. */
-                        if (s_ho_c0 < 0.05f) { s_ho_c0 = 0.05f; }
-                        if (s_ho_c0 > 1.00f) { s_ho_c0 = 1.00f; }
+                        /* #170: SIGNED. cos(de) is what the drag really
+                         * makes on the rotor q axis: positive forward,
+                         * NEGATIVE in reverse. The old code used |de| and
+                         * clamped to >= 0.05, i.e. it pre-loaded the wrong
+                         * torque sign every time the motor ran backwards. */
+                        s_ho_c0    = cosf(s_ho_ds);
+                        if (fabsf(s_ho_c0) < 0.05f) {
+                            s_ho_c0 = (s_ho_c0 >= 0.0f) ? 0.05f : -0.05f;
+                        }
+                        if (s_ho_c0 >  1.00f) { s_ho_c0 =  1.00f; }
+                        if (s_ho_c0 < -1.00f) { s_ho_c0 = -1.00f; }
                     }
                 } else {
                     s_ho_cnt = 0u;
@@ -1549,8 +1557,9 @@ static void task_foc(uint32_t t_pick)
 
                 /* Torque the drag was delivering. Captured BEFORE alg_if_stop,
                  * which zeroes i_now and f_hz. */
-                iq0 = s_if.i_now * s_ho_c0;
-                if (iq0 < 0.0f) { iq0 = 0.0f; }
+                iq0 = s_if.i_now * s_ho_c0;   /* signed: reverse < 0 (#170) */
+                if (iq0 >  FOC_I_MAX_A) { iq0 =  FOC_I_MAX_A; }
+                if (iq0 < -FOC_I_MAX_A) { iq0 = -FOC_I_MAX_A; }
 
                 s_sfoc  = 1u;
                 alg_if_stop(&s_if);
@@ -1590,7 +1599,7 @@ static void task_foc(uint32_t t_pick)
          * lands exactly on i_now*cos(dth), the value the speed loop is
          * preloaded with, so torque is continuous across the hand-over. */
         if ((s_ho_state == 2u) && (s_if.phase == 1u)) {
-            float rem = s_ho_dth * (1.0f - s_ho_w);
+            float rem = s_ho_ds * (1.0f - s_ho_w);
             float cw  = cosf(rem);
 
             if (cw > 0.20f) {

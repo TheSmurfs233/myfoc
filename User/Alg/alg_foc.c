@@ -127,6 +127,8 @@ float alg_foc_step(alg_foc_t *f,
     float beta;
     float vd;
     float vq;
+    float ff_d = 0.0f;
+    float ff_q = 0.0f;
     float v_alpha;
     float v_beta;
     float mag;
@@ -149,15 +151,16 @@ float alg_foc_step(alg_foc_t *f,
     f->i_alpha = alpha;
     f->i_beta  = beta;
 
-    vd = alg_pi_step(&f->pi_d, id_ref - f->id, ts);
-    vq = alg_pi_step(&f->pi_q, iq_ref - f->iq, ts);
-
-    /* S7.2 feedforward: tell the loop about the coupling and back-EMF terms
-     * instead of letting the integrators discover them.
-     *   vd = R*id + L*did/dt - w*L*iq
-     *   vq = R*iq + L*diq/dt + w*L*id + w*psi
-     * K_emf already includes psi, and omega_e is signed so a reversing motor
-     * gets the right sign without a special case. */
+    /* S10.12 (#170): the feed-forward must not eat the PI voltage head-room.
+     * The PI output used to be clamped to +-v_lim BEFORE the ff was added, so
+     * with a negative ff (reverse) the usable voltage collapsed to
+     * v_lim - |ff| = 5.7 - 2.93 = 2.77 V while the back-EMF alone was 2.9 V at
+     * -970 rpm. The loop lost current control and the machine free-ran as a
+     * fixed-voltage V/f drive (measured #169: iq_ref 1.16 A, iq 0.09 A, speed
+     * pinned at -970 rpm whatever the command).
+     * Compute the ff first and widen the PI limits by |ff| on each axis; the
+     * vector limit below is still the real clamp and it already unwinds the
+     * integrators, so forward behaviour is unchanged. */
     if ((f->ff_gain > 0.0f) && (omega_e != 0.0f)) {
         /* At low speed the encoder speed estimate (10 ms window) is noisy,
          * so the feedforward mostly injects that noise into vq: measured
@@ -177,11 +180,18 @@ float alg_foc_step(alg_foc_t *f,
         if (g > 0.0f) {
             float wl = g * f->l_h * omega_e;
 
-            vd -= wl * f->iq;
-            vq += wl * f->id;
-            vq += g * f->k_emf * omega_e;
+            ff_d = -wl * f->iq;
+            ff_q  =  (wl * f->id) + (g * f->k_emf * omega_e);
         }
     }
+
+    f->pi_d.out_min = -(f->v_lim + fabsf(ff_d));
+    f->pi_d.out_max =  (f->v_lim + fabsf(ff_d));
+    f->pi_q.out_min = -(f->v_lim + fabsf(ff_q));
+    f->pi_q.out_max =  (f->v_lim + fabsf(ff_q));
+
+    vd = alg_pi_step(&f->pi_d, id_ref - f->id, ts) + ff_d;
+    vq = alg_pi_step(&f->pi_q, iq_ref - f->iq, ts) + ff_q;
 
     /* Voltage circle: keep the vector direction, scale the magnitude. */
     mag = sqrtf((vd * vd) + (vq * vq));

@@ -86,6 +86,17 @@ void alg_if_set_target(alg_if_t *v, float f_hz)
      * later call resurrected a ramp that the hand-over had already stopped
      * (measured 06:00: the I/f came back and hijacked the current references,
      * pinning the drive at 600 rpm with the drag current). */
+    /* #170: alg_if_start seeds f_hz with the POSITIVE minimum (2 Hz). In
+     * reverse the drag then had to ramp down through zero (67 ms of forward
+     * rotation) before it moved the right way, which kicked the rotor. If the
+     * frame is still inside 1.5 * f_min and the new target asks for the other
+     * direction, snap to the signed minimum instead. */
+    if ((v->run != 0u) && (v->phase == 1u) && (f_hz != 0.0f) &&
+        ((v->f_hz > 0.0f) != (f_hz > 0.0f)) &&
+        (v->f_hz <  (1.5f * v->f_min_hz)) &&
+        (v->f_hz > -(1.5f * v->f_min_hz))) {
+        v->f_hz = (f_hz > 0.0f) ? v->f_min_hz : -v->f_min_hz;
+    }
     v->f_target = f_hz;
 }
 
