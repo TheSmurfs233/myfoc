@@ -168,6 +168,18 @@ if os.path.exists(ACCEPT):
     if m and wave_ch is not None and int(m.group(1)) != wave_ch:
         err('wave channels: board_cfg.h has %d, accept expects %s' % (wave_ch, m.group(1)))
 
+# docs/31 quotes WAVE_CH as well; a stale copy there is invisible otherwise
+# (it said 19 while the code had 21).
+PARAMS = os.path.join(ROOT, 'docs', '31_参数表.md')
+if wave_ch is not None and os.path.exists(PARAMS):
+    for _n, _line in enumerate(read(PARAMS).splitlines(), 1):
+        if '`WAVE_CH`' not in _line:
+            continue
+        _m = re.search(r'`WAVE_CH`\s*\|\s*(\d+)', _line)
+        if _m and int(_m.group(1)) != wave_ch:
+            err('%s:%d WAVE_CH says %s, board_cfg.h has %d'
+                % (rel(PARAMS), _n, _m.group(1), wave_ch))
+
 # ------------------------------------------------------------- 6. build id
 build_id = None
 if os.path.exists(BOARD_CFG):
@@ -202,6 +214,19 @@ if build_id is not None:
             if m and int(m.group(1)) != build_id:
                 err('%s:%d baseline says #%s, board_cfg.h has #%d'
                     % (rel(README), n, m.group(1), build_id))
+    # Any doc that quotes the build id next to FW_BUILD_ID must match as
+    # well: the parameter table still said 127 while the firmware was at 180,
+    # because nothing looked outside docs/01 and the README.
+    for p in DOCS:
+        if os.path.basename(p) in STALE_SCAN_SKIP:
+            continue
+        for n, line in enumerate(read(p).splitlines(), 1):
+            if 'FW_BUILD_ID' not in line:
+                continue
+            m = re.search(r'FW_BUILD_ID`?\s*\|\s*(\d+)', line)
+            if m and int(m.group(1)) != build_id:
+                err('%s:%d FW_BUILD_ID row says %s, board_cfg.h has %d'
+                    % (rel(p), n, m.group(1), build_id))
 
 # --------------------------------------------------------- 7. stale markers
 for p in DOCS:
