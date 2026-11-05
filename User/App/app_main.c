@@ -1980,11 +1980,11 @@ static void task_foc(uint32_t t_pick)
                 {
                     float i_abs = sqrtf((ic * ic) + (is * is));
                     float v_abs = sqrtf((vc * vc) + (vs * vs));
-                    float z_abs = (i_abs > 0.001f) ? (v_abs / i_abs) : 0.0f;
+                    float z_abs = (i_abs > 1.0e-3f) ? (v_abs / i_abs) : 0.0f;
                     float w_hf  = 6.2831853f * ID_HF_HZ;
-                    float l_mag = 0.0f;
                     float r_use = (s_id.r_ohm > 0.0f) ? s_id.r_ohm : MOTOR_R_OHM;
                     float x2    = (z_abs * z_abs) - (r_use * r_use);
+                    float l_mag = 0.0f;
 
                     rc = alg_ident_z(vc, vs, ic, is, w_hf, &l_h, &r_o);
                     /* L comes from the magnitude, not from the phase.  The
@@ -1993,18 +1993,30 @@ static void task_foc(uint32_t t_pick)
                      * order hold: on the bench the real part landed at 0.24
                      * ohm instead of the 2.2 ohm the DC test measured, while
                      * |Z| was right.  With R known, sqrt(|Z|^2 - R^2)/w is
-                     * immune to that phase error.  The phase fit is printed
-                     * next to it as a sanity check. */
-                    if (x2 > 0.0f) {
-                        l_mag = sqrtf(x2) / w_hf;
+                     * immune to that phase error.
+                     *
+                     * A failed injection hides in |Z| = |v|/|i| (tiny |i| gives
+                     * a huge |Z|), so the answer is range checked before it is
+                     * believed - a wrong L pasted into motor_cfg.h is worse
+                     * than no L at all. */
+                    if ((x2 > 0.0f) && (i_abs >= (ALG_IDENT_I_MIN * 3.0f))) {
+                        float l_try = sqrtf(x2) / w_hf;
+
+                        if ((l_try > 1.0e-5f) && (l_try < 5.0e-2f)) {
+                            l_mag = l_try;
+                        }
+                    }
+                    if (l_mag > 0.0f) {
                         s_id.l_h   = l_mag;
                         s_id.valid = 1u;
-                    } else if (rc == 0u) {
+                    } else if ((rc == 0u) && (l_h > 1.0e-5f) && (l_h < 5.0e-2f)) {
                         s_id.l_h   = l_h;
                         s_id.valid = 1u;
+                    } else if (rc == 0u) {
+                        rc = 4u;
                     }
-                    if ((rc != 0u) && (l_mag <= 0.0f)) {
-                        log_printf("ERR sident hf: weak answer (%u), |i| %.3f A, |v| %.3f V",
+                    if (s_id.l_h <= 0.0f) {
+                        log_printf("ERR sident hf: no usable answer (%u), |i| %.3f A, |v| %.3f V",
                                    (unsigned)rc, (double)i_abs, (double)v_abs);
                     } else {
                         log_printf(" sident hf %.1f kHz; |z| %.2f ohm, |i| %.3f A, |v| %.3f V",

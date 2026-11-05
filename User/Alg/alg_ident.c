@@ -31,9 +31,6 @@
  * deliver, so vd no longer describes the machine. */
 #define IDENT_V_SAT      0.95f
 
-/* Below this much current the impedance has no meaning. */
-#define IDENT_I_MIN      0.01f
-
 void alg_ident_l_reset(alg_ident_l_t *s)
 {
     s->s_yd = 0.0f;
@@ -99,7 +96,7 @@ uint8_t alg_ident_z(float v_c, float v_s, float i_c, float i_s, float omega,
 {
     float den = (i_c * i_c) + (i_s * i_s);
 
-    if (den < (IDENT_I_MIN * IDENT_I_MIN)) {
+    if (den < (ALG_IDENT_I_MIN * ALG_IDENT_I_MIN)) {
         return 1u;
     }
     if (omega < 1.0f) {

@@ -64,6 +64,11 @@ float alg_ident_ke(float e_abs, float omega_e);
 uint8_t alg_ident_z(float v_c, float v_s, float i_c, float i_s, float omega,
                     float *l_h, float *r_ohm);
 
+/* Below this much current an impedance has no meaning; the injection
+ * amplitude is expected to be several times this. */
+#define ALG_IDENT_I_MIN  0.01f
+
+
 #ifdef __cplusplus
 }
 #endif

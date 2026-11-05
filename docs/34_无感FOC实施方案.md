@@ -231,7 +231,7 @@ eq = −eα·sinθ̂ + eβ·cosθ̂ = ωe·ψf·cos(θ̂ − θe)
 | `sident r` | 只测 R | 约 1.2 s |
 | `sident l` | 测 R + L（L 需要 R，输出带 `experimental`） | 约 2 s |
 | `sident ke` | 直接从 I/f 拖动开始，跳过静止段 | 约 2 s |
-| `sident hf` | 高频注入测 L（2 kHz、0.15 A，先自动测 R）；推荐用这个，比 `sident l` 准得多 | 约 2 s |
+| `sident hf` | 高频注入测 L（2 kHz、0.15 A，先自动测 R）；推荐用这个，比 `sident l` 准得多。结果有量程护栏（注入 ≥30 mA、L 在 10 uH~50 mH），不合格报 `no usable answer` 而不是给个数 | 约 2 s |
 | `sident stop` | 中止（KE 段会顺手停掉 I/f） | — |
 
 输出（每次子测试一行，最后一行汇总并给出可直接粘贴的整数）：
