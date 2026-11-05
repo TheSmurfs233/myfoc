@@ -162,7 +162,7 @@ static void print_help(void)
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
     log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
     log_printf(" sfoc <go|off>  I/f then hand over to the observer (S10.5)");
-    log_printf(" sident [r|l|ke|all|stop]  identify R, L, KE (S10.7)");
+    log_printf(" sident [r|l|ke|all|stop]  identify R, KE (l is noisy)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on [hz]|off>  waveform upload (21ch needs <=250)");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -964,7 +964,7 @@ static float   s_pll_zeta = PLL_ZETA;
 
     /* ---------------- sident (S10.7 parameter identification) ---- */
     else if (strcmp(tok[0], "sident") == 0) {
-        uint8_t what = 0u;          /* 0 = all three */
+        uint8_t what = 0u;          /* 0 = R + KE (L is opt-in) */
 
         if (n >= 2u) {
             if (strcmp(tok[1], "r") == 0)        { what = APP_ID_R; }
@@ -996,6 +996,8 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("ERR speed loop running, 'spd 0' first");
             } else if (rc == 9u) {
                 log_printf("ERR sident busy");
+            } else if (rc == 10u) {
+                log_printf("ERR bus %.1f V, wait for it to settle", (double)bsp_vbus_volts());
             } else {
                 log_printf("ERR sident rejected (%u)", (unsigned)rc);
             }

@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID         174u
+#define FW_BUILD_ID         175u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -351,11 +351,12 @@ extern "C" {
 #define ID_SETTLE_MS            300u    /* let the current loop settle         */
 #define ID_AVG_MS               100u    /* average vd over this window         */
 #define ID_ZERO_MS              200u    /* step starts from zero current       */
-#define ID_STEP_A               0.50f   /* d-axis current step for L           */
-#define ID_L_MS                 2u      /* fit window, 40 samples at 20 kHz    */
+#define ID_STEP_A               0.20f   /* d-axis current step for L           */
+#define ID_L_MS                 4u      /* fit window, 80 samples at 20 kHz    */
 #define ID_KE_HZ                60.0f   /* electrical Hz of the drag           */
 #define ID_KE_HOLD_MS           800u    /* steady-state window before sampling */
-#define ID_KE_TIMEOUT_MS        5000u   /* drag never reached the target       */
+#define ID_KE_TIMEOUT_MS        5000u
+#define ID_VBUS_MAX_V           13.0f   /* ident refuses to start above this */   /* drag never reached the target       */
 
 
 /* ==========================================================================

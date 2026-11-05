@@ -32,8 +32,15 @@ typedef struct {
 
 void alg_ident_l_reset(alg_ident_l_t *s);
 
-/* One 20 kHz sample.  didt is in A/s, vd/id from the FOC state. */
-void alg_ident_l_add(alg_ident_l_t *s, float vd, float id, float didt, float r_ohm);
+/* One 20 kHz sample.  didt is in A/s, vd/id from the FOC state.
+ *
+ * Frames where the loop was against its voltage limit, or where the current
+ * barely moved, carry no usable slope and are skipped.  With a 0.5 A step the
+ * term L*didt is about 5 V against a 5.7 V budget, so those frames used to
+ * bias the fit low (0.29 mH against 0.5 mH declared).  Pass vlim <= 0 to
+ * disable the saturation check. */
+void alg_ident_l_add(alg_ident_l_t *s, float vd, float id, float didt,
+                     float r_ohm, float vlim);
 
 /* Returns 0 on success, 1 = not enough data, 2 = negative/zero inductance. */
 uint8_t alg_ident_l_result(const alg_ident_l_t *s, float *l_h);

@@ -1214,9 +1214,19 @@ uint8_t app_id_start(uint8_t what)
     if (s_if.run != 0u)           { return 7u; }
     if (s_spd.on != 0u)           { return 8u; }
 
+    /* Back-to-back ident runs pump the bus up (the drag stage returns
+     * energy), and a run started on a high bus trips over-voltage half way
+     * through.  13 V is still well under the 13.8 V trip. */
+    if (bsp_vbus_volts() > ID_VBUS_MAX_V) {
+        return 10u;
+    }
+
     s_id_mask = (uint8_t)(what & (uint8_t)(APP_ID_R | APP_ID_L | APP_ID_KE));
     if (s_id_mask == 0u) {
-        s_id_mask = (uint8_t)(APP_ID_R | APP_ID_L | APP_ID_KE);
+        /* L is left out on purpose: at a 4 sample time constant the fit is
+         * too noisy to be trusted (it reads 0.29 mH against 0.5 mH).  It is
+         * still available through an explicit "sident l". */
+        s_id_mask = (uint8_t)(APP_ID_R | APP_ID_KE);
     }
     /* The inductance fit subtracts R*id, so asking for L implies R. */
     if ((s_id_mask & (uint8_t)APP_ID_L) != 0u) {
@@ -1878,7 +1888,7 @@ static void task_foc(uint32_t t_pick)
             id_ref = ID_STEP_A;
             iq_ref = 0.0f;
             if (s_id_n < win) {
-                alg_ident_l_add(&s_id_l, s_foc.vd, s_foc.id, didt, s_id.r_ohm);
+                alg_ident_l_add(&s_id_l, s_foc.vd, s_foc.id, didt, s_id.r_ohm, FOC_V_LIM);
             }
             s_id_id_prev = s_foc.id;
             s_id_n++;
@@ -1888,7 +1898,7 @@ static void task_foc(uint32_t t_pick)
                     log_printf("ERR sident l: no usable slope");
                 } else {
                     s_id.valid = 1u;
-                    log_printf(" sident l %.3f mH (%u samples)",
+                    log_printf(" sident l %.3f mH (%u samples, experimental)",
                                (double)(s_id.l_h * 1000.0f), (unsigned)s_id_l.n);
                 }
                 id_enter(((s_id_mask & (uint8_t)APP_ID_KE) != 0u) ? 6u : 0u);
@@ -1900,8 +1910,10 @@ static void task_foc(uint32_t t_pick)
             uint32_t el = HAL_GetTick() - s_id_t0;
 
             if (el > (uint32_t)ID_KE_TIMEOUT_MS) {
+                float f_tmo = s_if.f_hz;
+
                 alg_if_stop(&s_if);
-                log_printf("ERR sident ke timed out (f %.1f Hz)", (double)s_if.f_hz);
+                log_printf("ERR sident ke timed out (f %.1f Hz)", (double)f_tmo);
                 id_enter(0u);
                 id_report();
             } else if ((el >= (uint32_t)ID_KE_HOLD_MS) &&
@@ -1909,12 +1921,15 @@ static void task_foc(uint32_t t_pick)
                 float e_a = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
                                   (s_obs.e_beta  * s_obs.e_beta));
 
+                float f_ke = s_if.f_hz;
+
                 s_id.ke = alg_ident_ke(e_a, s_obs.omega_e);
                 alg_if_stop(&s_if);
                 if (s_id.ke > 0.0f) {
                     s_id.valid = 1u;
-                    log_printf(" sident ke %.4f V/(rad/s) (|e| %.3f V at %.1f Hz)",
-                               (double)s_id.ke, (double)e_a, (double)s_if.f_hz);
+                    /* mV per rad/s: the log formatter has no 4 decimal places. */
+                    log_printf(" sident ke %.3f mV/(rad/s) (|e| %.3f V at %.1f Hz)",
+                               (double)(s_id.ke * 1000.0f), (double)e_a, (double)f_ke);
                 } else {
                     log_printf("ERR sident ke: |e| too small (%.3f V)", (double)e_a);
                 }

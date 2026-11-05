@@ -2677,9 +2677,11 @@ section("alg_ident: L from the vd - R*id = L*di/dt fit");
      * then make sure the fit recovers the inductance. */
     alg_ident_l_reset(&acc);
     for (k = 0; k < 20; k++) {
-        float didt = 3000.0f;              /* A/s */
+        /* Keep vd well inside the 5.7 V budget: the fit now ignores frames
+         * that sit against the limit (that is the whole point of #175). */
+        float didt = 300.0f;               /* A/s */
         float vd   = (2.3f * id) + (0.0005f * didt);
-        alg_ident_l_add(&acc, vd, id, didt, 2.3f);
+        alg_ident_l_add(&acc, vd, id, didt, 2.3f, 5.7f);
         id += didt * 0.00005f;
     }
     T(acc.n == 20u);
@@ -2688,16 +2690,32 @@ section("alg_ident: L from the vd - R*id = L*di/dt fit");
 
     /* A frame where the current did not move contributes nothing. */
     alg_ident_l_reset(&acc);
-    alg_ident_l_add(&acc, 1.0f, 0.0f, 0.0f, 2.3f);
+    alg_ident_l_add(&acc, 1.0f, 0.0f, 0.0f, 2.3f, 5.7f);
     T(alg_ident_l_result(&acc, &l) == 1u);
 
     /* A negative slope can only be noise: say so rather than returning a
      * negative inductance. */
     alg_ident_l_reset(&acc);
     for (k = 0; k < 5; k++) {
-        alg_ident_l_add(&acc, 0.0f, 0.0f, -3000.0f, 2.3f);
+        alg_ident_l_add(&acc, 0.0f, 0.0f, -3000.0f, 2.3f, 5.7f);
     }
     T(alg_ident_l_result(&acc, &l) == 2u);
+
+    /* A frame against the voltage limit says nothing about L: the drive was
+     * not able to apply what the loop asked for, so it must not be counted. */
+    alg_ident_l_reset(&acc);
+    for (k = 0; k < 20; k++) {
+        alg_ident_l_add(&acc, 5.65f, 0.10f, 3000.0f, 2.3f, 5.7f);
+    }
+    T(acc.n == 0u);
+    T(alg_ident_l_result(&acc, &l) == 1u);
+
+    /* Settled frames (current not moving) add nothing either. */
+    alg_ident_l_reset(&acc);
+    for (k = 0; k < 20; k++) {
+        alg_ident_l_add(&acc, 0.46f, 0.20f, 5.0f, 2.3f, 5.7f);
+    }
+    T(acc.n == 0u);
 }
 
 section("alg_ident: KE from the drag");

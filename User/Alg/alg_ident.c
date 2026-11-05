@@ -24,6 +24,12 @@
  * where the ADC glitched would dominate the whole sum, so clamp it. */
 #define IDENT_DIDT_MAX   20000.0f
 #define IDENT_L_MIN      1e-9f
+/* Below this the current is settling, not ramping: the frame adds noise to
+ * sum(d*d) without adding information about the slope. */
+#define IDENT_DIDT_MIN   100.0f
+/* Within 5% of the voltage limit means the loop asked for more than it could
+ * deliver, so vd no longer describes the machine. */
+#define IDENT_V_SAT      0.95f
 
 void alg_ident_l_reset(alg_ident_l_t *s)
 {
@@ -32,10 +38,18 @@ void alg_ident_l_reset(alg_ident_l_t *s)
     s->n    = 0u;
 }
 
-void alg_ident_l_add(alg_ident_l_t *s, float vd, float id, float didt, float r_ohm)
+void alg_ident_l_add(alg_ident_l_t *s, float vd, float id, float didt,
+                     float r_ohm, float vlim)
 {
     float d = didt;
     float y = vd - (r_ohm * id);
+
+    if (fabsf(d) < IDENT_DIDT_MIN) {
+        return;
+    }
+    if ((vlim > 0.0f) && (fabsf(vd) >= (vlim * IDENT_V_SAT))) {
+        return;
+    }
 
     if (d >  IDENT_DIDT_MAX) { d =  IDENT_DIDT_MAX; }
     if (d < -IDENT_DIDT_MAX) { d = -IDENT_DIDT_MAX; }
