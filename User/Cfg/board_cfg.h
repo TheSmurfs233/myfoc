@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID         173u
+#define FW_BUILD_ID         174u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -330,6 +330,33 @@ extern "C" {
  * vector rotates d -> q over IF_XFADE_MS. */
 #define IF_I_RAMP_MS           300u     /* 0 -> i_amp ramp time        */
 #define IF_XFADE_MS            80u      /* d -> q crossfade time       */
+/* ==========================================================================
+ * S10.7: parameter identification (sident)
+ * ==========================================================================
+ * The goal of the whole porting story is "swap the motor, change motor_cfg.h".
+ * These are the numbers the drive needs before any of it runs, and none of them
+ * needs an instrument:
+ *   R   two steady-state (vd, id) points on the d axis, rotor held by the
+ *       vector itself, so there is no torque and the shaft does not move.
+ *   L   one d-axis current step from zero: vd - R*id = L*di/dt fitted over the
+ *       first ID_L_MS, where di/dt is still large enough to dominate the noise.
+ *   KE  I/f drag at ID_KE_HZ until the observer settles, then |e| / |omega_e|.
+ * The align phase pulls the rotor onto the forced theta = 0 first: without it
+ * "d" is wherever the shaft happened to stop and the current step would make
+ * torque instead of measuring inductance. */
+#define ID_ALIGN_A              0.50f   /* d-axis current that holds the shaft */
+#define ID_ALIGN_MS             400u    /* long enough for the rotor to settle */
+#define ID_I1_A                 0.30f   /* resistance, low point               */
+#define ID_I2_A                 0.60f   /* resistance, high point              */
+#define ID_SETTLE_MS            300u    /* let the current loop settle         */
+#define ID_AVG_MS               100u    /* average vd over this window         */
+#define ID_ZERO_MS              200u    /* step starts from zero current       */
+#define ID_STEP_A               0.50f   /* d-axis current step for L           */
+#define ID_L_MS                 2u      /* fit window, 40 samples at 20 kHz    */
+#define ID_KE_HZ                60.0f   /* electrical Hz of the drag           */
+#define ID_KE_HOLD_MS           800u    /* steady-state window before sampling */
+#define ID_KE_TIMEOUT_MS        5000u   /* drag never reached the target       */
+
 
 /* ==========================================================================
  * S10.5: hand-over from the I/f frame to the observer

@@ -561,6 +561,11 @@
               <FilePath>../User/Alg/alg_if.c</FilePath>
             </File>
             <File>
+              <FileName>alg_ident.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>../User/Alg/alg_ident.c</FilePath>
+            </File>
+            <File>
               <FileName>app_main.c</FileName>
               <FileType>1</FileType>
               <FilePath>../User/App/app_main.c</FilePath>

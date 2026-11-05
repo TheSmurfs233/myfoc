@@ -162,6 +162,7 @@ static void print_help(void)
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
     log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
     log_printf(" sfoc <go|off>  I/f then hand over to the observer (S10.5)");
+    log_printf(" sident [r|l|ke|all|stop]  identify R, L, KE (S10.7)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on [hz]|off>  waveform upload (21ch needs <=250)");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -958,6 +959,46 @@ static float   s_pll_zeta = PLL_ZETA;
                        (double)(app_if_freq_hz() * 60.0f / (float)ENC_POLE_PAIRS),
                        (double)app_if_amp(),
                        (double)(app_if_theta() * 57.29577951308232f));
+        }
+    }
+
+    /* ---------------- sident (S10.7 parameter identification) ---- */
+    else if (strcmp(tok[0], "sident") == 0) {
+        uint8_t what = 0u;          /* 0 = all three */
+
+        if (n >= 2u) {
+            if (strcmp(tok[1], "r") == 0)        { what = APP_ID_R; }
+            else if (strcmp(tok[1], "l") == 0)   { what = APP_ID_L; }
+            else if (strcmp(tok[1], "ke") == 0)  { what = APP_ID_KE; }
+            else if (strcmp(tok[1], "all") == 0) { what = 0u; }
+            else if (strcmp(tok[1], "stop") == 0) {
+                app_id_stop();
+                log_printf("OK sident stopped");
+                return;
+            } else {
+                log_printf("ERR usage=sident [r|l|ke|all|stop]");
+                return;
+            }
+        }
+
+        {
+            uint8_t rc = app_id_start(what);
+
+            if (rc == 0u) {
+                log_printf(" (hold still, about 4 s)");
+            } else if (rc == 2u) {
+                log_printf("ERR start first");
+            } else if (rc == 4u) {
+                log_printf("ERR mode 2 first (FOC)");
+            } else if (rc == 7u) {
+                log_printf("ERR I/f running, wait or 'if off'");
+            } else if (rc == 8u) {
+                log_printf("ERR speed loop running, 'spd 0' first");
+            } else if (rc == 9u) {
+                log_printf("ERR sident busy");
+            } else {
+                log_printf("ERR sident rejected (%u)", (unsigned)rc);
+            }
         }
     }
 

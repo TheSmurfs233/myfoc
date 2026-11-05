@@ -231,6 +231,33 @@ typedef struct {
 uint8_t app_sstep_start(float rpm);
 const app_sstep_info_t *app_sstep_info(void);
 
+/* ---------------- parameter identification (S10.7) ---------------- */
+typedef struct {
+    float   r_ohm;     /* measured phase resistance                */
+    float   l_h;       /* measured phase inductance                */
+    float   ke;        /* measured back-EMF, V per electrical rad/s */
+    float   v_pt[2];   /* the two (v, i) points behind r_ohm        */
+    float   i_pt[2];
+    uint8_t phase;     /* 0 idle, 1 align, 2 R low, 3 R high, 4 zero,
+                          5 step, 6 KE drag                          */
+    uint8_t valid;     /* at least one result is usable             */
+} app_id_info_t;
+
+/* What to measure.  L needs R (the fit subtracts R*id), so asking for L turns
+ * the resistance test on as well; KE alone needs no standstill phase. */
+#define APP_ID_R    0x01u
+#define APP_ID_L    0x02u
+#define APP_ID_KE   0x04u
+
+/* Start the identification state machine (needs RUN + CTRL_FOC, and neither
+ * the speed loop nor I/f may be active).
+ * Returns 0 = OK, 2 = not running, 4 = wrong mode, 7 = I/f running,
+ *         8 = speed loop running, 9 = already busy. */
+uint8_t app_id_start(uint8_t what);
+const app_id_info_t *app_id_info(void);
+uint8_t app_id_busy(void);
+void    app_id_stop(void);
+
 /* Friction feedforward: base current + slope per rpm (option C, S7.3).
  * Returns 0 = OK, 1 = out of range. */
 uint8_t app_spd_set_ff(float base_a, float slope_a_per_rpm);

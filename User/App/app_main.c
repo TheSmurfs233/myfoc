@@ -24,6 +24,7 @@
 #include "alg_foc.h"
 #include "alg_obs.h"
 #include "alg_if.h"
+#include "alg_ident.h"
 #include "alg_spd.h"
 #include "bsp_adc.h"
 #include "bsp_vbus.h"
@@ -137,6 +138,17 @@ static uint16_t  s_sstep_tail_n;
 /* S6.4: automatic current step measurement. */
 static app_step_info_t s_step;
 static uint8_t         s_step_phase;    /* 0 idle, 1 settle, 2 record  */
+
+/* ---- S10.7: parameter identification (sident) ---- */
+static app_id_info_t   s_id;
+static uint8_t         s_id_mask;       /* APP_ID_* bits             */
+static uint8_t         s_id_phase;      /* 0 idle, see app_id_info_t */
+static uint32_t        s_id_n;          /* frames inside the phase   */
+static float           s_id_v_sum;
+static uint32_t        s_id_v_n;
+static float           s_id_id_prev;
+static alg_ident_l_t   s_id_l;
+static uint32_t        s_id_t0;         /* KE drag, HAL ticks        */
 static uint32_t        s_step_t0;
 static uint32_t        s_step_n;
 static uint32_t        s_step_t10;
@@ -753,6 +765,8 @@ uint8_t app_stop(void)
     alg_foc_reset(&s_foc);
     app_spd_off();
     s_step_phase       = 0u;             /* cancel any running step */
+    s_id_phase         = 0u;             /* cancel any identification */
+    s_id.phase         = 0u;
     s_sstep_phase      = 0u;
     /* Acknowledge the latched fault, keep the per-type counters. */
     s_fault.code       = (uint8_t)APP_FAULT_NONE;
@@ -877,6 +891,8 @@ void app_fault_raise(uint8_t code, float value)
     s_foc_info.iq_ref  = 0.0f;
     foc_info_clear_meas();               /* #167: no stale display */
     s_step_phase       = 0u;
+    s_id_phase         = 0u;             /* cancel any identification */
+    s_id.phase         = 0u;
     alg_foc_reset(&s_foc);
 
     /* S10: the bridge is about to go quiet, so the speed estimate must not
@@ -1133,6 +1149,101 @@ const app_sstep_info_t *app_sstep_info(void)
     return &s_sstep;
 }
 
+/* ------------------------------------------------------------------ */
+/* S10.7: parameter identification (sident)                            */
+/* ------------------------------------------------------------------ */
+
+static void id_enter(uint8_t phase);
+
+static void id_report(void)
+{
+    log_printf("OK sident r %.3f ohm, l %.3f mH, ke %.4f V/(rad/s)",
+               (double)s_id.r_ohm, (double)(s_id.l_h * 1000.0f), (double)s_id.ke);
+    log_printf(" motor_cfg.h: r_ohm %d mOhm, l_h %d uH, ke_v_rad_s %d uV",
+               (int)((s_id.r_ohm * 1000.0f) + 0.5f),
+               (int)((s_id.l_h   * 1000000.0f) + 0.5f),
+               (int)((s_id.ke    * 1000000.0f) + 0.5f));
+}
+
+static void id_enter(uint8_t phase)
+{
+    s_id_phase = phase;
+    s_id.phase = phase;
+    s_id_n     = 0u;
+    s_id_v_sum = 0.0f;
+    s_id_v_n   = 0u;
+    s_id_t0    = HAL_GetTick();
+
+    if (phase == 4u) {
+        alg_ident_l_reset(&s_id_l);
+    }
+    if (phase == 6u) {
+        /* KE needs the rotor turning at a known electrical frequency and the
+         * observer watching it: that is exactly the I/f drag with the shadow
+         * observer on. */
+        float rpm = ID_KE_HZ * (60.0f / (float)ENC_POLE_PAIRS);
+
+        (void)app_obs_set_on(1u);
+        (void)app_if_start(rpm);
+    }
+}
+
+uint8_t app_id_busy(void)
+{
+    return (s_id_phase != 0u) ? 1u : 0u;
+}
+
+const app_id_info_t *app_id_info(void)
+{
+    return &s_id;
+}
+
+void app_id_stop(void)
+{
+    if (s_id_phase == 6u) {
+        alg_if_stop(&s_if);
+    }
+    id_enter(0u);
+}
+
+uint8_t app_id_start(uint8_t what)
+{
+    if (s_st.state != APP_ST_RUN) { return 2u; }
+    if (s_st.mode != CTRL_FOC)    { return 4u; }
+    if (s_id_phase != 0u)         { return 9u; }
+    if (s_if.run != 0u)           { return 7u; }
+    if (s_spd.on != 0u)           { return 8u; }
+
+    s_id_mask = (uint8_t)(what & (uint8_t)(APP_ID_R | APP_ID_L | APP_ID_KE));
+    if (s_id_mask == 0u) {
+        s_id_mask = (uint8_t)(APP_ID_R | APP_ID_L | APP_ID_KE);
+    }
+    /* The inductance fit subtracts R*id, so asking for L implies R. */
+    if ((s_id_mask & (uint8_t)APP_ID_L) != 0u) {
+        s_id_mask |= (uint8_t)APP_ID_R;
+    }
+
+    s_id.r_ohm = 0.0f;
+    s_id.l_h   = 0.0f;
+    s_id.ke    = 0.0f;
+    s_id.valid = 0u;
+    s_id.v_pt[0] = 0.0f; s_id.v_pt[1] = 0.0f;
+    s_id.i_pt[0] = 0.0f; s_id.i_pt[1] = 0.0f;
+    alg_ident_l_reset(&s_id_l);
+
+    if ((s_id_mask & (uint8_t)APP_ID_R) != 0u) {
+        id_enter(1u);
+        log_printf("OK sident started, %s%s%s",
+                   ((s_id_mask & APP_ID_R) != 0u) ? "r " : "",
+                   ((s_id_mask & APP_ID_L) != 0u) ? "l " : "",
+                   ((s_id_mask & APP_ID_KE) != 0u) ? "ke" : "");
+    } else {
+        id_enter(6u);
+        log_printf("OK sident started, ke");
+    }
+    return 0u;
+}
+
 uint8_t app_step_start(float amp)
 {
     if (s_st.state != APP_ST_RUN) { return 2u; }
@@ -1210,7 +1321,10 @@ static void task_foc(uint32_t t_pick)
      * back-EMF is present, keep the loop closed at zero current on the
      * observer angle; only drop to the zero vector once the rotor has
      * stopped. |e| is the criterion, never the observer's omega. */
-    if ((e->valid == 0u) && (s_if.run == 0u) && (s_sfoc == 0u)) {
+    /* S10.7: the identification runs on the forced theta = 0 frame, with no
+     * encoder and nothing else turning, so it is a third exception. */
+    if ((e->valid == 0u) && (s_if.run == 0u) && (s_sfoc == 0u) &&
+        (s_id_phase == 0u)) {
         float em2 = (s_obs.e_alpha * s_obs.e_alpha)
                   + (s_obs.e_beta  * s_obs.e_beta);
 
@@ -1692,6 +1806,135 @@ static void task_foc(uint32_t t_pick)
         s_foc_info.spd_rpm = s_if.f_hz * (60.0f / (float)ENC_POLE_PAIRS);
     }
 
+    /* ---- S10.7: parameter identification -------------------------
+     * Runs the normal current loop on a forced theta = 0 frame. Phase 1
+     * pulls the rotor onto that axis, so after it "d" really is the magnet
+     * axis: the resistance points see no torque and the current step
+     * measures L instead of accelerating the shaft. */
+    if (s_id_phase != 0u) {
+        uint32_t settle = (uint32_t)ID_SETTLE_MS * (FOC_FREQ_HZ / 1000u);
+        uint32_t avg    = (uint32_t)ID_AVG_MS    * (FOC_FREQ_HZ / 1000u);
+        uint32_t win    = (uint32_t)ID_L_MS      * (FOC_FREQ_HZ / 1000u);
+
+        switch (s_id_phase) {
+        case 1u:                                  /* align onto theta = 0 */
+            id_ref = ID_ALIGN_A;
+            iq_ref = 0.0f;
+            s_id_n++;
+            if (s_id_n >= ((uint32_t)ID_ALIGN_MS * (FOC_FREQ_HZ / 1000u))) {
+                id_enter(2u);
+            }
+            break;
+
+        case 2u:                                  /* R, low point */
+        case 3u: {                                /* R, high point */
+            id_ref = (s_id_phase == 2u) ? ID_I1_A : ID_I2_A;
+            iq_ref = 0.0f;
+            s_id_n++;
+            if (s_id_n > settle) {
+                s_id_v_sum += s_foc.vd;
+                s_id_v_n++;
+            }
+            if (s_id_n >= (settle + avg)) {
+                uint8_t slot = (s_id_phase == 2u) ? 0u : 1u;
+
+                s_id.v_pt[slot] = (s_id_v_n != 0u)
+                                  ? (s_id_v_sum / (float)s_id_v_n) : 0.0f;
+                s_id.i_pt[slot] = s_foc.id;
+                if (slot == 0u) {
+                    id_enter(3u);
+                } else {
+                    s_id.r_ohm = alg_ident_r(s_id.v_pt[0], s_id.i_pt[0],
+                                             s_id.v_pt[1], s_id.i_pt[1]);
+                    if (s_id.r_ohm <= 0.0f) {
+                        log_printf("ERR sident r: points too close (%.2f/%.2f A)",
+                                   (double)s_id.i_pt[0], (double)s_id.i_pt[1]);
+                    } else {
+                        s_id.valid = 1u;
+                        log_printf(" sident r %.3f ohm (%.2fA %.3fV, %.2fA %.3fV)",
+                                   (double)s_id.r_ohm,
+                                   (double)s_id.i_pt[0], (double)s_id.v_pt[0],
+                                   (double)s_id.i_pt[1], (double)s_id.v_pt[1]);
+                    }
+                    id_enter(((s_id_mask & (uint8_t)APP_ID_L) != 0u) ? 4u
+                             : (((s_id_mask & (uint8_t)APP_ID_KE) != 0u) ? 6u : 0u));
+                }
+            }
+            break; }
+
+        case 4u:                                  /* back to zero current */
+            id_ref = 0.0f;
+            iq_ref = 0.0f;
+            s_id_n++;
+            if (s_id_n >= ((uint32_t)ID_ZERO_MS * (FOC_FREQ_HZ / 1000u))) {
+                s_id_id_prev = s_foc.id;
+                id_enter(5u);
+            }
+            break;
+
+        case 5u: {                                /* current step -> L */
+            float didt = (s_foc.id - s_id_id_prev) / FOC_TS;
+
+            id_ref = ID_STEP_A;
+            iq_ref = 0.0f;
+            if (s_id_n < win) {
+                alg_ident_l_add(&s_id_l, s_foc.vd, s_foc.id, didt, s_id.r_ohm);
+            }
+            s_id_id_prev = s_foc.id;
+            s_id_n++;
+            if (s_id_n >= win) {
+                if (alg_ident_l_result(&s_id_l, &s_id.l_h) != 0u) {
+                    s_id.l_h = 0.0f;
+                    log_printf("ERR sident l: no usable slope");
+                } else {
+                    s_id.valid = 1u;
+                    log_printf(" sident l %.3f mH (%u samples)",
+                               (double)(s_id.l_h * 1000.0f), (unsigned)s_id_l.n);
+                }
+                id_enter(((s_id_mask & (uint8_t)APP_ID_KE) != 0u) ? 6u : 0u);
+                if (s_id_phase == 0u) { id_report(); }
+            }
+            break; }
+
+        case 6u: {                                /* KE from the I/f drag */
+            uint32_t el = HAL_GetTick() - s_id_t0;
+
+            if (el > (uint32_t)ID_KE_TIMEOUT_MS) {
+                alg_if_stop(&s_if);
+                log_printf("ERR sident ke timed out (f %.1f Hz)", (double)s_if.f_hz);
+                id_enter(0u);
+                id_report();
+            } else if ((el >= (uint32_t)ID_KE_HOLD_MS) &&
+                       (fabsf(s_if.f_hz) >= (ID_KE_HZ * 0.9f))) {
+                float e_a = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
+                                  (s_obs.e_beta  * s_obs.e_beta));
+
+                s_id.ke = alg_ident_ke(e_a, s_obs.omega_e);
+                alg_if_stop(&s_if);
+                if (s_id.ke > 0.0f) {
+                    s_id.valid = 1u;
+                    log_printf(" sident ke %.4f V/(rad/s) (|e| %.3f V at %.1f Hz)",
+                               (double)s_id.ke, (double)e_a, (double)s_if.f_hz);
+                } else {
+                    log_printf("ERR sident ke: |e| too small (%.3f V)", (double)e_a);
+                }
+                id_enter(0u);
+                id_report();
+            }
+            break; }
+
+        default:
+            id_enter(0u);
+            break;
+        }
+
+        /* The I/f block owns the references in phase 6. */
+        if (s_id_phase != 6u) {
+            s_foc_info.id_ref = id_ref;
+            s_foc_info.iq_ref = iq_ref;
+        }
+    }
+
     /* ---- S10.5: which angle drives the Park transform? ----
      *   not in I/f        -> encoder
      *   I/f, before blend -> forced frame
@@ -1703,7 +1946,12 @@ static void task_foc(uint32_t t_pick)
         float th_use;
         float we_use;
 
-        if ((coast != 0u) || (s_sfoc != 0u)) {
+        if ((s_id_phase != 0u) && (s_id_phase != 6u)) {
+            /* S10.7: the identification owns the frame while it runs: a
+             * forced theta = 0 that phase 1 has already aligned the rotor to. */
+            th_use = 0.0f;
+            we_use = 0.0f;
+        } else if ((coast != 0u) || (s_sfoc != 0u)) {
             /* True sensorless, or coasting after a release with no encoder:
              * the observer supplies the angle. */
             th_use = s_obs.theta_out;

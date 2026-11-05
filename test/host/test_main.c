@@ -40,6 +40,7 @@
 #include "alg_pll.h"
 #include "alg_obs.h"
 #include "alg_if.h"
+#include "alg_ident.h"
 #include "mid_enc.h"
 #include "mid_trig.h"
 #include "bsp_uart.h"
@@ -2651,7 +2652,64 @@ static void test_cmd(void)
     }
     section_end();
 
-    section("cfg: motor parameter golden values");
+    section("alg_ident: R from two points cancels the offset");
+{
+    /* A single point carries the inverter drop: 0.3 A -> 2.60 ohm and 0.6 A
+     * -> 2.45 ohm on the reference motor. The slope must give the 2.3 ohm
+     * the magnet wire actually has. */
+    float r1 = alg_ident_r(0.30f * 2.60f, 0.30f, 0.60f * 2.45f, 0.60f);
+    float r2 = alg_ident_r(0.780f, 0.30f, 1.470f, 0.60f);
+
+    T(fabsf(r1 - 2.30f) < 0.01f);
+    T(fabsf(r2 - 2.30f) < 0.01f);
+    /* identical currents: refuse instead of dividing by ~0 */
+    T(alg_ident_r(1.0f, 0.50f, 1.0f, 0.51f) == 0.0f);
+}
+
+section("alg_ident: L from the vd - R*id = L*di/dt fit");
+{
+    alg_ident_l_t acc;
+    float l = 0.0f;
+    float id = 0.0f;
+    int   k;
+
+    /* Synthesize the exact law for L = 0.5 mH and R = 2.3 ohm at 20 kHz,
+     * then make sure the fit recovers the inductance. */
+    alg_ident_l_reset(&acc);
+    for (k = 0; k < 20; k++) {
+        float didt = 3000.0f;              /* A/s */
+        float vd   = (2.3f * id) + (0.0005f * didt);
+        alg_ident_l_add(&acc, vd, id, didt, 2.3f);
+        id += didt * 0.00005f;
+    }
+    T(acc.n == 20u);
+    T(alg_ident_l_result(&acc, &l) == 0u);
+    T(fabsf(l - 0.0005f) < 1e-6f);
+
+    /* A frame where the current did not move contributes nothing. */
+    alg_ident_l_reset(&acc);
+    alg_ident_l_add(&acc, 1.0f, 0.0f, 0.0f, 2.3f);
+    T(alg_ident_l_result(&acc, &l) == 1u);
+
+    /* A negative slope can only be noise: say so rather than returning a
+     * negative inductance. */
+    alg_ident_l_reset(&acc);
+    for (k = 0; k < 5; k++) {
+        alg_ident_l_add(&acc, 0.0f, 0.0f, -3000.0f, 2.3f);
+    }
+    T(alg_ident_l_result(&acc, &l) == 2u);
+}
+
+section("alg_ident: KE from the drag");
+{
+    /* 0.00413 V per elec rad/s is what the motor does: at 60 Hz electrical
+     * (377 rad/s) the back-EMF is 1.56 V. */
+    T(fabsf(alg_ident_ke(1.557f, 377.0f) - 0.00413f) < 1e-5f);
+    T(fabsf(alg_ident_ke(1.557f, -377.0f) - 0.00413f) < 1e-5f);  /* signed w */
+    T(alg_ident_ke(1.557f, 0.5f) == 0.0f);                        /* too slow */
+}
+
+section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the
          * test fails, so the change has to be reviewed on purpose: the
