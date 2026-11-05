@@ -41,7 +41,7 @@ extern "C" {
  *
  * The acceptance script (test/accept/s1_accept.py) greps this value out of the
  * source and compares it with what the board reports. */
-#define FW_BUILD_ID         178u
+#define FW_BUILD_ID         179u
 
 /* ---- zero-drift calibration record in flash ---------------------------- */
 /* The last 2KB page of the 128KB part is reserved for it; the Keil target ROM
@@ -356,6 +356,17 @@ extern "C" {
 #define ID_KE_HZ                60.0f   /* electrical Hz of the drag           */
 #define ID_KE_HOLD_MS           800u    /* steady-state window before sampling */
 #define ID_KE_TIMEOUT_MS        5000u   /* drag never reached the target       */
+
+/* S10.7b: L by high frequency injection (#179).  At 2 kHz the reactance is
+ * 6.3 ohm against R = 2.3 ohm, so L dominates the impedance - the exact
+ * opposite of the current step test, where R dominated the 5.7 V budget and
+ * L came out 20% low.  The current loop stays closed, so the injection
+ * cannot walk the DC operating point away. */
+#define ID_HF_HZ            2000.0f  /* 1/10 of the 20 kHz frame rate        */
+#define ID_HF_A             0.15f    /* peak of the d axis current command   */
+#define ID_HF_SETTLE_MS     20u      /* 4 whole cycles dropped from the sum  */
+#define ID_HF_MS            100u     /* 200 whole cycles averaged            */
+#define ID_HF_DW            (6.2831853f * ID_HF_HZ / (float)FOC_FREQ_HZ)
 #define ID_VBUS_MAX_V           13.0f   /* ident refuses to start above this   */
 
 

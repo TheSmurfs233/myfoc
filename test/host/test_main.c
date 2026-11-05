@@ -2727,6 +2727,24 @@ section("alg_ident: KE from the drag");
     T(alg_ident_ke(1.557f, 0.5f) == 0.0f);                        /* too slow */
 }
 
+section("alg_ident: Z = R + jwL out of the injection coefficients");
+{
+    const float w = 6.2831853f * 2000.0f;
+    const float a = 0.1f;                 /* amps at the injection */
+    const float vc = a * w * 0.0005f;     /* L part, on cosine     */
+    const float vs = a * 2.3f;            /* R part, on sine       */
+    float l_h = 0.0f;
+    float r_o = 0.0f;
+
+    T(alg_ident_z(vc, vs, 0.0f, a, w, &l_h, &r_o) == 0u);
+    T(fabsf(l_h - 0.0005f) < 1e-6f);
+    T(fabsf(r_o - 2.3f) < 1e-3f);
+    /* No current: nothing can be divided out. */
+    T(alg_ident_z(vc, vs, 0.0f, 0.0f, w, &l_h, &r_o) == 1u);
+    /* A negative inductance means the phase convention broke. */
+    T(alg_ident_z(-vc, vs, 0.0f, a, w, &l_h, &r_o) == 3u);
+}
+
 section("cfg: motor parameter golden values");
     {
         /* Deliberate snapshots. If a refactor changes one of these the

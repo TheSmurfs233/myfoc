@@ -248,6 +248,7 @@ typedef struct {
 #define APP_ID_R    0x01u
 #define APP_ID_L    0x02u
 #define APP_ID_KE   0x04u
+#define APP_ID_HF   0x08u   /* 2 kHz injection: L and R from the impedance */
 
 /* Start the identification state machine (needs RUN + CTRL_FOC, and neither
  * the speed loop nor I/f may be active).

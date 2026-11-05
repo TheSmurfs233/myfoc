@@ -151,6 +151,13 @@ static float           s_id_v_sum;
 static uint32_t        s_id_v_n;
 static float           s_id_id_prev;
 static alg_ident_l_t   s_id_l;
+static float           s_hf_ph;    /* injection phase (rad) */
+static float           s_hf_i_c;
+static float           s_hf_i_s;
+static float           s_hf_v_c;
+static float           s_hf_v_s;
+static float           s_hf_vd_prev;
+static uint32_t        s_hf_n;     /* frames averaged */
 static uint32_t        s_id_t0;         /* KE drag, HAL ticks        */
 static uint32_t        s_step_t0;
 static uint32_t        s_step_n;
@@ -1211,6 +1218,18 @@ static void id_enter(uint8_t phase)
     if (phase == 4u) {
         alg_ident_l_reset(&s_id_l);
     }
+    if (phase == 8u) {
+        /* Start the injection at a zero crossing so that a whole number of
+         * cycles is summed: DC offsets and the settling transient average
+         * out instead of leaking into the sine/cosine coefficients. */
+        s_hf_ph  = 0.0f;
+        s_hf_i_c = 0.0f;
+        s_hf_i_s = 0.0f;
+        s_hf_v_c = 0.0f;
+        s_hf_v_s = 0.0f;
+        s_hf_vd_prev = 0.0f;
+        s_hf_n   = 0u;
+    }
     if (phase == 6u) {
         /* KE needs the rotor turning at a known electrical frequency and the
          * observer watching it: that is exactly the I/f drag with the shadow
@@ -1260,16 +1279,22 @@ uint8_t app_id_start(uint8_t what)
         return 10u;
     }
 
-    s_id_mask = (uint8_t)(what & (uint8_t)(APP_ID_R | APP_ID_L | APP_ID_KE));
+    s_id_mask = (uint8_t)(what & (uint8_t)(APP_ID_R | APP_ID_L | APP_ID_KE |
+                                           APP_ID_HF));
     if (s_id_mask == 0u) {
         /* L is left out on purpose: at a 4 sample time constant the fit is
          * too noisy to be trusted (it reads 0.29 mH against 0.5 mH).  It is
          * still available through an explicit "sident l". */
         s_id_mask = (uint8_t)(APP_ID_R | APP_ID_KE);
     }
-    /* The inductance fit subtracts R*id, so asking for L implies R. */
+    /* The inductance fit subtracts R*id, so asking for L implies R.  The
+     * injection measures R on the way to L, so it implies R as well. */
     if ((s_id_mask & (uint8_t)APP_ID_L) != 0u) {
         s_id_mask |= (uint8_t)APP_ID_R;
+    }
+    if ((s_id_mask & (uint8_t)APP_ID_HF) != 0u) {
+        /* The injection reports both, so mark both for id_report(). */
+        s_id_mask |= (uint8_t)(APP_ID_R | APP_ID_L);
     }
 
     s_id.r_ohm = 0.0f;
@@ -1280,12 +1305,17 @@ uint8_t app_id_start(uint8_t what)
     s_id.i_pt[0] = 0.0f; s_id.i_pt[1] = 0.0f;
     alg_ident_l_reset(&s_id_l);
 
-    if ((s_id_mask & (uint8_t)APP_ID_R) != 0u) {
+    if ((s_id_mask & (uint8_t)(APP_ID_R | APP_ID_HF)) != 0u) {
         id_enter(1u);
-        log_printf("OK sident started, %s%s%s",
-                   ((s_id_mask & APP_ID_R) != 0u) ? "r " : "",
-                   ((s_id_mask & APP_ID_L) != 0u) ? "l " : "",
-                   ((s_id_mask & APP_ID_KE) != 0u) ? "ke" : "");
+        if ((s_id_mask & (uint8_t)APP_ID_HF) != 0u) {
+            log_printf("OK sident started, hf L at %.1f kHz, %.2f A",
+                       (double)(ID_HF_HZ / 1000.0f), (double)ID_HF_A);
+        } else {
+            log_printf("OK sident started, %s%s%s",
+                       ((s_id_mask & APP_ID_R) != 0u) ? "r " : "",
+                       ((s_id_mask & APP_ID_L) != 0u) ? "l " : "",
+                       ((s_id_mask & APP_ID_KE) != 0u) ? "ke" : "");
+        }
     } else {
         id_enter(6u);
         log_printf("OK sident started, ke");
@@ -1903,6 +1933,94 @@ static void task_foc(uint32_t t_pick)
             }
             break;
 
+        case 8u: {               /* L by a 2 kHz injection on d */
+            uint32_t hs = (uint32_t)ID_HF_SETTLE_MS * (FOC_FREQ_HZ / 1000u);
+            uint32_t hn = (uint32_t)ID_HF_MS * (FOC_FREQ_HZ / 1000u);
+            float sv = sinf(s_hf_ph);
+            float cv = cosf(s_hf_ph);
+
+            /* Closed loop current injection: the PI makes the voltage, so
+             * whatever DC offset the bridge has is corrected away and the
+             * measured id is what really flowed.  Both id and vd are taken
+             * at the same frame, so the one frame actuator delay shifts the
+             * two by the same angle and cancels in Z = V/I. */
+            id_ref = ID_HF_A * sv;
+            iq_ref = 0.0f;
+            s_id_n++;
+            if (s_id_n > hs) {
+                s_hf_i_c += s_foc.id * cv;
+                s_hf_i_s += s_foc.id * sv;
+                /* This frame's current was made by the PREVIOUS frame's
+                 * voltage: the compare registers written in frame k-1 act
+                 * during frame k, and the ADC samples in the middle of it.
+                 * Pairing vd(k) with id(k) would rotate Z by one frame
+                 * (18 deg at 2 kHz) and wreck R while leaving L usable. */
+                s_hf_v_c  += s_hf_vd_prev * cv;
+                s_hf_v_s  += s_hf_vd_prev * sv;
+                s_hf_n++;
+            }
+            s_hf_vd_prev = s_foc.vd;
+            s_hf_ph += ID_HF_DW;
+            if (s_hf_ph > 6.2831853f) {
+                s_hf_ph -= 6.2831853f;
+            }
+            if (s_id_n >= (hs + hn)) {
+                float ic = 0.0f, is = 0.0f, vc = 0.0f, vs = 0.0f;
+                float l_h = 0.0f, r_o = 0.0f;
+                uint8_t rc;
+
+                if (s_hf_n != 0u) {
+                    float k = 2.0f / (float)s_hf_n;
+
+                    ic  = s_hf_i_c * k;
+                    is  = s_hf_i_s * k;
+                    vc  = s_hf_v_c * k;
+                    vs  = s_hf_v_s * k;
+                }
+                {
+                    float i_abs = sqrtf((ic * ic) + (is * is));
+                    float v_abs = sqrtf((vc * vc) + (vs * vs));
+                    float z_abs = (i_abs > 0.001f) ? (v_abs / i_abs) : 0.0f;
+                    float w_hf  = 6.2831853f * ID_HF_HZ;
+                    float l_mag = 0.0f;
+                    float r_use = (s_id.r_ohm > 0.0f) ? s_id.r_ohm : MOTOR_R_OHM;
+                    float x2    = (z_abs * z_abs) - (r_use * r_use);
+
+                    rc = alg_ident_z(vc, vs, ic, is, w_hf, &l_h, &r_o);
+                    /* L comes from the magnitude, not from the phase.  The
+                     * phase of this fit carries the actuator delay (frame k's
+                     * voltage acts in frame k+1) plus the half frame zero
+                     * order hold: on the bench the real part landed at 0.24
+                     * ohm instead of the 2.2 ohm the DC test measured, while
+                     * |Z| was right.  With R known, sqrt(|Z|^2 - R^2)/w is
+                     * immune to that phase error.  The phase fit is printed
+                     * next to it as a sanity check. */
+                    if (x2 > 0.0f) {
+                        l_mag = sqrtf(x2) / w_hf;
+                        s_id.l_h   = l_mag;
+                        s_id.valid = 1u;
+                    } else if (rc == 0u) {
+                        s_id.l_h   = l_h;
+                        s_id.valid = 1u;
+                    }
+                    if ((rc != 0u) && (l_mag <= 0.0f)) {
+                        log_printf("ERR sident hf: weak answer (%u), |i| %.3f A, |v| %.3f V",
+                                   (unsigned)rc, (double)i_abs, (double)v_abs);
+                    } else {
+                        log_printf(" sident hf %.1f kHz; |z| %.2f ohm, |i| %.3f A, |v| %.3f V",
+                                   (double)(ID_HF_HZ / 1000.0f),
+                                   (double)z_abs, (double)i_abs, (double)v_abs);
+                        log_printf(" sident hf l %.3f mH (|z| %.2f, r %.3f ohm), phase fit l %.3f mH",
+                                   (double)(s_id.l_h * 1000.0f), (double)z_abs,
+                                   (double)r_use, (double)(l_h * 1000.0f));
+                    }
+                }
+                id_enter(0u);
+                id_report();
+            }
+            break;
+        }
+
         case 2u:                                  /* R, low point */
         case 3u: {                                /* R, high point */
             id_ref = (s_id_phase == 2u) ? ID_I1_A : ID_I2_A;
@@ -1946,7 +2064,7 @@ static void task_foc(uint32_t t_pick)
             if (s_id_n >= ((uint32_t)ID_ZERO_MS * (FOC_FREQ_HZ / 1000u))) {
                 s_id_id_prev = s_foc.id;
                 s_id_vd_prev = s_foc.vd;
-                id_enter(5u);
+                id_enter(((s_id_mask & (uint8_t)APP_ID_HF) != 0u) ? 8u : 5u);
             }
             break;
 

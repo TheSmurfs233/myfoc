@@ -54,6 +54,16 @@ float alg_ident_r(float v1, float i1, float v2, float i2);
  * 1 rad/s. */
 float alg_ident_ke(float e_abs, float omega_e);
 
+/* Series impedance of one injection frequency.  The caller hands over the
+ * sine and cosine coefficients of v and i at that frequency, i.e.
+ *   x(t) = Xc*cos(wt) + Xs*sin(wt)
+ * and gets  Z = R + jwL  solved out of Z = V/I:
+ *   R = (Vc*Ic + Vs*Is) / |I|^2,  L = ((Vc*Is - Vs*Ic) / |I|^2) / w
+ * Returns 0 on success, 1 when |I| is too small to divide by, 2 when omega
+ * is not usable, 3 when the fit gives a negative inductance. */
+uint8_t alg_ident_z(float v_c, float v_s, float i_c, float i_s, float omega,
+                    float *l_h, float *r_ohm);
+
 #ifdef __cplusplus
 }
 #endif

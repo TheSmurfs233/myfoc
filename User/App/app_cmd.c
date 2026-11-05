@@ -162,7 +162,7 @@ static void print_help(void)
     log_printf(" obs [on|off|bw|r|l|lpf|comp]  back-EMF observer, shadow mode");
     log_printf(" if <rpm|off|i|acc>  open-loop I/f start (S10.4)");
     log_printf(" sfoc <go|off>  I/f then hand over to the observer (S10.5)");
-    log_printf(" sident [r|l|ke|all|stop]  identify R, KE (l is noisy)");
+    log_printf(" sident [r|l|ke|hf|all|stop]  identify R, L, KE (hf = 2 kHz)");
     log_printf(" led <on|off|toggle>   drive the PF1 LED");
     log_printf(" wave <on [hz]|off>  waveform upload (21ch needs <=250)");
     log_printf(" rate <hz>      waveform rate 1..500 (FireWater)");
@@ -971,12 +971,13 @@ static float   s_pll_zeta = PLL_ZETA;
             else if (strcmp(tok[1], "l") == 0)   { what = APP_ID_L; }
             else if (strcmp(tok[1], "ke") == 0)  { what = APP_ID_KE; }
             else if (strcmp(tok[1], "all") == 0) { what = 0u; }
+            else if (strcmp(tok[1], "hf") == 0)  { what = APP_ID_HF; }
             else if (strcmp(tok[1], "stop") == 0) {
                 app_id_stop();
                 log_printf("OK sident stopped");
                 return;
             } else {
-                log_printf("ERR usage=sident [r|l|ke|all|stop]");
+                log_printf("ERR usage=sident [r|l|ke|hf|all|stop]");
                 return;
             }
         }
