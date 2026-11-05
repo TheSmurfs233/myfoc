@@ -355,8 +355,8 @@ extern "C" {
 #define ID_L_MS                 4u      /* fit window, 80 samples at 20 kHz    */
 #define ID_KE_HZ                60.0f   /* electrical Hz of the drag           */
 #define ID_KE_HOLD_MS           800u    /* steady-state window before sampling */
-#define ID_KE_TIMEOUT_MS        5000u
-#define ID_VBUS_MAX_V           13.0f   /* ident refuses to start above this */   /* drag never reached the target       */
+#define ID_KE_TIMEOUT_MS        5000u   /* drag never reached the target       */
+#define ID_VBUS_MAX_V           13.0f   /* ident refuses to start above this   */
 
 
 /* ==========================================================================

@@ -1157,12 +1157,42 @@ static void id_enter(uint8_t phase);
 
 static void id_report(void)
 {
-    log_printf("OK sident r %.3f ohm, l %.3f mH, ke %.4f V/(rad/s)",
-               (double)s_id.r_ohm, (double)(s_id.l_h * 1000.0f), (double)s_id.ke);
-    log_printf(" motor_cfg.h: r_ohm %d mOhm, l_h %d uH, ke_v_rad_s %d uV",
-               (int)((s_id.r_ohm * 1000.0f) + 0.5f),
-               (int)((s_id.l_h   * 1000000.0f) + 0.5f),
-               (int)((s_id.ke    * 1000000.0f) + 0.5f));
+    /* Only report what was really measured.  A default run leaves L alone, and
+     * printing "l_h 0 uH" invites pasting 0 into motor_cfg.h.  The log
+     * formatter also has no %.4f, so KE is quoted in mV per rad/s. */
+    uint8_t has_r  = (((s_id_mask & (uint8_t)APP_ID_R)  != 0u) && (s_id.r_ohm > 0.0f)) ? 1u : 0u;
+    uint8_t has_l  = (((s_id_mask & (uint8_t)APP_ID_L)  != 0u) && (s_id.l_h   > 0.0f)) ? 1u : 0u;
+    uint8_t has_ke = (((s_id_mask & (uint8_t)APP_ID_KE) != 0u) && (s_id.ke    > 0.0f)) ? 1u : 0u;
+    int r_u  = (int)((s_id.r_ohm * 1000.0f) + 0.5f);
+    int l_u  = (int)((s_id.l_h   * 1000000.0f) + 0.5f);
+    int ke_u = (int)((s_id.ke    * 1000000.0f) + 0.5f);
+
+    if ((has_r != 0u) && (has_l != 0u) && (has_ke != 0u)) {
+        log_printf("OK sident r %.3f ohm, l %.3f mH, ke %.3f mV/(rad/s)",
+                   (double)s_id.r_ohm, (double)(s_id.l_h * 1000.0f),
+                   (double)(s_id.ke * 1000.0f));
+        log_printf(" motor_cfg.h; r_ohm %d mOhm, l_h %d uH, ke_v_rad_s %d uV",
+                   r_u, l_u, ke_u);
+    } else if ((has_r != 0u) && (has_ke != 0u)) {
+        log_printf("OK sident r %.3f ohm, ke %.3f mV/(rad/s)",
+                   (double)s_id.r_ohm, (double)(s_id.ke * 1000.0f));
+        log_printf(" motor_cfg.h; r_ohm %d mOhm, ke_v_rad_s %d uV", r_u, ke_u);
+    } else if ((has_r != 0u) && (has_l != 0u)) {
+        log_printf("OK sident r %.3f ohm, l %.3f mH",
+                   (double)s_id.r_ohm, (double)(s_id.l_h * 1000.0f));
+        log_printf(" motor_cfg.h; r_ohm %d mOhm, l_h %d uH", r_u, l_u);
+    } else if (has_r != 0u) {
+        log_printf("OK sident r %.3f ohm", (double)s_id.r_ohm);
+        log_printf(" motor_cfg.h; r_ohm %d mOhm", r_u);
+    } else if (has_ke != 0u) {
+        log_printf("OK sident ke %.3f mV/(rad/s)", (double)(s_id.ke * 1000.0f));
+        log_printf(" motor_cfg.h; ke_v_rad_s %d uV", ke_u);
+    } else if (has_l != 0u) {
+        log_printf("OK sident l %.3f mH", (double)(s_id.l_h * 1000.0f));
+        log_printf(" motor_cfg.h; l_h %d uH", l_u);
+    } else {
+        log_printf("ERR sident: nothing measured");
+    }
 }
 
 static void id_enter(uint8_t phase)

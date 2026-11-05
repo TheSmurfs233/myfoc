@@ -236,10 +236,10 @@ eq = −eα·sinθ̂ + eβ·cosθ̂ = ωe·ψf·cos(θ̂ − θe)
 输出（每次子测试一行，最后一行汇总并给出可直接粘贴的整数）：
 
 ```
- sident r 2.18 ohm (0.30A 0.66V, 0.60A 1.32V)
- sident ke 3.89 mV/(rad/s) (|e| 1.14 V at 54.0 Hz)
-OK sident r 2.18 ohm, l 0.00 mH, ke 0.0039 V/(rad/s)
- motor_cfg.h: r_ohm 2184 mOhm, l_h 0 uH, ke_v_rad_s 3890 uV
+ sident r 2.19 ohm (0.30A 0.66V, 0.60A 1.32V)
+ sident ke 3.61 mV/(rad/s) (|e| 1.08 V at 54.0 Hz)
+OK sident r 2.19 ohm, ke 3.61 mV/(rad/s)
+ motor_cfg.h; r_ohm 2191 mOhm, ke_v_rad_s 3609 uV
 ```
 
 换电机时按这个顺序做：
@@ -274,6 +274,8 @@ OK sident r 2.18 ohm, l 0.00 mH, ke 0.0039 V/(rad/s)
 因此：
 
 - `sident` / `sident all` 默认只做 R + KE；`sident l` 仍可用，输出带 `experimental` 字样
+- 汇总行**只列测到的东西**：默认跑只有 `r_ohm` 和 `ke_v_rad_s`，不会出现 `l_h 0 uH` 误导你往
+  `motor_cfg.h` 里粘 0（`MOTOR_CFG_ASSERT` 也会拦，但被拦在编译期不如一开始就不给）
 - **`motor_cfg.h` 继续用手册值（2300 mOhm / 500 uH / 4130 uV）**：观测器对 L 不敏感
   （800 rpm 下 0.2 mH 误差只贡献约 0.03 V 前馈），而 `OBS_TRIM_DEG` 的 -3.6 度是在 L = 0.5 mH 下标定的，
   换成 0.29 mH 要重标 trim，风险大于收益。实测值只作“换电机时量级对不对”的参照。
