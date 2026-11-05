@@ -51,8 +51,14 @@
 
 /* Control seeds: starting points that follow from R/L/J; re-tune with the
  * step/sstep tools after a motor swap. */
-#define MOTOR_FOC_KP            3.00f       /* V/A                         */
-#define MOTOR_FOC_KI            11000.0f    /* V/(A*s)                     */
+/* The current loop was tuned for L = 0.5 mH: kp = 3.0 gave a crossover of
+ * kp/(2*pi*L) = 955 Hz.  The new motor is 0.93 mH, which would halve that to
+ * 513 Hz and leave the back-EMF observer (tuned against the 955 Hz loop) short
+ * of phase margin - it diverged right after hand-over.  kp 5.5 puts the
+ * crossover back at 941 Hz; ki is scaled by the same 1.83 so the PI zero stays
+ * at ki/(2*pi*kp) = 579 Hz instead of sliding down with the plant pole. */
+#define MOTOR_FOC_KP            5.50f       /* V/A                         */
+#define MOTOR_FOC_KI            20000.0f    /* V/(A*s)                     */
 #define MOTOR_SPD_KP            0.006f      /* A/rpm                       */
 #define MOTOR_SPD_KI            0.080f      /* A/(rpm*s)                   */
 
