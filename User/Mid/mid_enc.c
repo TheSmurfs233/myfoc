@@ -46,6 +46,11 @@ static mid_enc_t s_enc;
  * boot. Used to tell "no encoder fitted" (all-zero frames) from "the
  * encoder died" so the former can fall back instead of faulting. */
 static uint8_t   s_raw_seen_ok;
+/* Frames whose 24 bits were not all zero.  A dead MISO line reads back as 24
+ * zeros, and the CRC of an all-zero frame is 0 as well, so the CRC check
+ * passes and the frame looks like "angle 0".  This counter is the only way to
+ * tell "the chip answered with 0" from "nothing drives the wire". */
+static uint32_t  s_bits_seen;
 static float    s_zero_rad;   /* zero_deg converted once */
 
 /* Speed estimator state (see ENC_SPD_WINDOW_MS) */
@@ -225,6 +230,9 @@ void mid_enc_update(void)
     mg     = (uint8_t)((w >> 6) & 0x0Fu);
     crc_rx = (uint8_t)(w & 0x3Fu);
 
+    if (w != 0u) {
+        s_bits_seen++;
+    }
     s_enc.raw    = d;
     s_enc.mg     = mg;
     s_enc.crc_ok = (mid_enc_crc6(w >> 6) == crc_rx) ? 1u : 0u;
@@ -362,6 +370,8 @@ void mid_enc_set_enabled(uint8_t en)
 uint8_t mid_enc_enabled(void) { return s_enc_enabled; }
 
 uint8_t mid_enc_seen_ok(void) { return s_raw_seen_ok; }
+
+uint32_t mid_enc_bits_seen(void) { return s_bits_seen; }
 
 void mid_enc_set_spd_src(uint8_t src)
 {

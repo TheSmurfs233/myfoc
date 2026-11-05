@@ -998,6 +998,8 @@ static float   s_pll_zeta = PLL_ZETA;
                 log_printf("ERR sident busy");
             } else if (rc == 10u) {
                 log_printf("ERR bus %.1f V, wait for it to settle", (double)bsp_vbus_volts());
+            } else if (rc == 11u) {
+                log_printf("ERR rotor still turning, wait for it to stop");
             } else {
                 log_printf("ERR sident rejected (%u)", (unsigned)rc);
             }
@@ -1281,10 +1283,11 @@ static float   s_pll_zeta = PLL_ZETA;
             log_printf("enc = no frame yet (frames=%u io_err=%u)",
                        (unsigned)e->frames, (unsigned)e->io_errs);
         } else {
-            log_printf("enc = mech %.2f elec %.2f deg, raw %u, mg %u, crc %s",
+            log_printf("enc = mech %.2f elec %.2f deg, raw %u, mg %u, crc %s, nz %u",
                        (double)e->mech_deg, (double)e->elec_deg,
                        (unsigned)e->raw, (unsigned)e->mg,
-                       (e->crc_ok != 0u) ? "ok" : "BAD");
+                       (e->crc_ok != 0u) ? "ok" : "BAD",
+                       (unsigned)mid_enc_bits_seen());
             log_printf(" spd = %.2f Hz elec, %.1f rpm mech",
                        (double)e->spd_hz, (double)e->spd_rpm);
             log_printf(" err = %u/%u crc, %u ovr, %u late, zero %.1f deg, dir %u, src %s",

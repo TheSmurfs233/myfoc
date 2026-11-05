@@ -56,7 +56,8 @@ static uint32_t     s_adc_seen;       /* ADC frame counter already consumed */
 static alg_vf_t      s_vf;
 static uint8_t       s_obs_on;    /* 1 = observer running (shadow) */
 
-static void app_sfoc_release(void);
+static void  app_sfoc_release(void);
+static float prot_speed_rpm(void);
 static uint8_t       s_coast;     /* #168: no angle source, rotor still
                                    * turning -> zero current, no short  */
 static uint32_t      s_coast_ticks;
@@ -142,6 +143,8 @@ static uint8_t         s_step_phase;    /* 0 idle, 1 settle, 2 record  */
 /* ---- S10.7: parameter identification (sident) ---- */
 static app_id_info_t   s_id;
 static uint8_t         s_id_mask;       /* APP_ID_* bits             */
+static float           s_id_vd_prev;    /* vd of the previous frame      */
+static uint32_t        s_id_t_ss;       /* tick when the drag hit target */
 static uint8_t         s_id_phase;      /* 0 idle, see app_id_info_t */
 static uint32_t        s_id_n;          /* frames inside the phase   */
 static float           s_id_v_sum;
@@ -1202,6 +1205,7 @@ static void id_enter(uint8_t phase)
     s_id_n     = 0u;
     s_id_v_sum = 0.0f;
     s_id_v_n   = 0u;
+    s_id_t_ss  = 0u;
     s_id_t0    = HAL_GetTick();
 
     if (phase == 4u) {
@@ -1241,6 +1245,11 @@ uint8_t app_id_start(uint8_t what)
     if (s_st.state != APP_ST_RUN) { return 2u; }
     if (s_st.mode != CTRL_FOC)    { return 4u; }
     if (s_id_phase != 0u)         { return 9u; }
+    /* Aligning onto d with a spinning rotor feeds the bus: measured twice on
+     * hardware right after a KE drag, the second run tripped overvoltage
+     * within 57 ms.  Ask for a rotor at rest; the drag itself ends by
+     * coasting, so this is a wait, not a dead end. */
+    if (fabsf(prot_speed_rpm()) > 30.0f) { return 11u; }
     if (s_if.run != 0u)           { return 7u; }
     if (s_spd.on != 0u)           { return 8u; }
 
@@ -1361,6 +1370,22 @@ static void task_foc(uint32_t t_pick)
      * back-EMF is present, keep the loop closed at zero current on the
      * observer angle; only drop to the zero vector once the rotor has
      * stopped. |e| is the criterion, never the observer's omega. */
+    /* S10.7 phase 7: brake the rotor to rest after a KE drag.  The zero
+     * vector is a three-phase short, so the energy stays in the windings
+     * instead of the bus; at 514 rpm the short current is ~0.6 A against a
+     * 1.28 A trip.  Zero-current coasting would take minutes. */
+    if (s_id_phase == 7u) {
+        bsp_pwm_set_all_duty(PWM_START_DUTY);
+        s_foc_info.id_ref = 0.0f;
+        s_foc_info.iq_ref = 0.0f;
+        foc_info_clear_meas();
+        if ((fabsf(prot_speed_rpm()) < 30.0f) ||
+            ((HAL_GetTick() - s_id_t0) > 2000u)) {
+            id_enter(0u);
+        }
+        return;
+    }
+
     /* S10.7: the identification runs on the forced theta = 0 frame, with no
      * encoder and nothing else turning, so it is a third exception. */
     if ((e->valid == 0u) && (s_if.run == 0u) && (s_sfoc == 0u) &&
@@ -1417,8 +1442,14 @@ static void task_foc(uint32_t t_pick)
                     mid_enc_set_enabled(0u);
                     s_prot_enc_cnt      = 0u;
                     s_prot_enc_zero_cnt = 0u;
-                    log_printf("warn no encoder frames, encoder off "
-                               "(enc on to re-enable)");
+                    if (mid_enc_bits_seen() == 0u) {
+                        /* 24 zeros every frame: nothing is driving MISO. */
+                        log_printf("warn encoder silent: no data on MISO "
+                                   "(check 3V3/SCK/MISO), encoder off");
+                    } else {
+                        log_printf("warn no encoder frames, encoder off "
+                                   "(enc on to re-enable)");
+                    }
                     return;
                 }
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
@@ -1445,8 +1476,14 @@ static void task_foc(uint32_t t_pick)
                     mid_enc_set_enabled(0u);
                     s_prot_enc_cnt      = 0u;
                     s_prot_enc_zero_cnt = 0u;
-                    log_printf("warn no encoder frames, encoder off "
-                               "(enc on to re-enable)");
+                    if (mid_enc_bits_seen() == 0u) {
+                        /* 24 zeros every frame: nothing is driving MISO. */
+                        log_printf("warn encoder silent: no data on MISO "
+                                   "(check 3V3/SCK/MISO), encoder off");
+                    } else {
+                        log_printf("warn no encoder frames, encoder off "
+                                   "(enc on to re-enable)");
+                    }
                     return;
                 }
                 app_fault_raise((uint8_t)APP_FAULT_ENCODER, 0.0f);
@@ -1908,6 +1945,7 @@ static void task_foc(uint32_t t_pick)
             s_id_n++;
             if (s_id_n >= ((uint32_t)ID_ZERO_MS * (FOC_FREQ_HZ / 1000u))) {
                 s_id_id_prev = s_foc.id;
+                s_id_vd_prev = s_foc.vd;
                 id_enter(5u);
             }
             break;
@@ -1918,9 +1956,13 @@ static void task_foc(uint32_t t_pick)
             id_ref = ID_STEP_A;
             iq_ref = 0.0f;
             if (s_id_n < win) {
-                alg_ident_l_add(&s_id_l, s_foc.vd, s_foc.id, didt, s_id.r_ohm, FOC_V_LIM);
+                /* vd is held for one PWM period before the current moves, so
+                 * the frame that produced this didt is the previous one. */
+                alg_ident_l_add(&s_id_l, s_id_vd_prev, s_foc.id, didt,
+                                s_id.r_ohm, FOC_V_LIM);
             }
             s_id_id_prev = s_foc.id;
+            s_id_vd_prev = s_foc.vd;
             s_id_n++;
             if (s_id_n >= win) {
                 if (alg_ident_l_result(&s_id_l, &s_id.l_h) != 0u) {
@@ -1939,6 +1981,16 @@ static void task_foc(uint32_t t_pick)
         case 6u: {                                /* KE from the I/f drag */
             uint32_t el = HAL_GetTick() - s_id_t0;
 
+            /* The drag ramps at IF_ACC_HZ_S, so for most of the run the rotor
+             * is still catching up and |e| / omega describes a transient.
+             * Start the hold timer when the field actually reaches the
+             * target, not when the phase started. */
+            if (s_id_t_ss == 0u) {
+                if (fabsf(s_if.f_hz) >= (ID_KE_HZ * 0.98f)) {
+                    s_id_t_ss = HAL_GetTick();
+                }
+            }
+
             if (el > (uint32_t)ID_KE_TIMEOUT_MS) {
                 float f_tmo = s_if.f_hz;
 
@@ -1946,8 +1998,8 @@ static void task_foc(uint32_t t_pick)
                 log_printf("ERR sident ke timed out (f %.1f Hz)", (double)f_tmo);
                 id_enter(0u);
                 id_report();
-            } else if ((el >= (uint32_t)ID_KE_HOLD_MS) &&
-                       (fabsf(s_if.f_hz) >= (ID_KE_HZ * 0.9f))) {
+            } else if ((s_id_t_ss != 0u) &&
+                       ((HAL_GetTick() - s_id_t_ss) >= (uint32_t)ID_KE_HOLD_MS)) {
                 float e_a = sqrtf((s_obs.e_alpha * s_obs.e_alpha) +
                                   (s_obs.e_beta  * s_obs.e_beta));
 
@@ -1963,8 +2015,13 @@ static void task_foc(uint32_t t_pick)
                 } else {
                     log_printf("ERR sident ke: |e| too small (%.3f V)", (double)e_a);
                 }
-                id_enter(0u);
                 id_report();
+                /* The drag leaves the rotor spinning at ID_KE_HZ, and a
+                 * zero-current coast takes minutes to stop it. Phase 7
+                 * shorts the phases instead: at 514 rpm the back-EMF is
+                 * 1.3 V, so the short current is ~0.6 A, far from the
+                 * 1.28 A trip, and the rotor is at rest in ~0.3 s. */
+                id_enter(7u);
             }
             break; }
 

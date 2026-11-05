@@ -56,6 +56,13 @@ uint8_t mid_enc_enabled(void);
  *  since boot (i.e. an encoder really answered at least once). */
 uint8_t mid_enc_seen_ok(void);
 
+/**
+ * @brief  Frames since boot whose 24 bits were not all zero.
+ * @note   mid_enc_seen_ok() is 0 either when the chip answers 0 or when
+ *         nothing drives MISO; this counter separates the two cases.
+ */
+uint32_t mid_enc_bits_seen(void);
+
 void    mid_enc_set_spd_src(uint8_t src);
 uint8_t mid_enc_spd_src(void);
 /* Window estimator result, kept for comparison. */
